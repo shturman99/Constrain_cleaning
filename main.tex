@@ -1,0 +1,27 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+
+% \title{Constrain cleaning}
+\title{Solving PDEs with constraints}
+%\author{Murman Gurgenidze}
+%\date{October 2026}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+% Clauds summary after my description of the socpe.
+Many numerical solvers evolve fields subject to constraints, such as 
+Maxwell equations, $\nabla \cdot {\bf B}=0$ and $\nabla \cdot {\bf E} = \rho_e$, in magnetohydrodynamics or the Hamiltonian and momentum constraints in numerical relativity.
+Even though these constraints are expected to be satisfied by the
+gauge invariance of the fields, together with the dynamics,
+discretization error can lead to their violation.
+Such a drift from the constrain can feed back into the dynamics, producing unphysical forces and unstable growing modes. Classical remedies (constrained transport, projection, hyperbolic cleaning, constraint damping) work well for linear constraints with known structure. They become expensive, hand-tuned or unavailable when constraints are nonlinear, or for unfamiliar field systems where no constraint-preserving formulation is known.
+
+This project will study whether machine learning can control constraint violation inside the time loop of an existing solver.
+Three approaches will be compared: (1) a neural corrector with hard constraint enforcement, (2) learned constraint-damping terms trained through a differentiable solver, and (3) learned constraint-preserving parameterizations, generalizing the vector-potential idea to systems where none is known.
+
+Work proceeds in stages: benchmark on 2D MHD against exact projection and Dedner cleaning, measuring both constraint violation and accuracy of the physical fields; then extend to nonlinear constraints (lattice Yang–Mills, simplified 3+1 gravity), where ML can offer a real advantage. The goal is corrections that recover the true solution, not merely ones that satisfy the constraint.
+
+\end{document}
