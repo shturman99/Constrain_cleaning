@@ -6,6 +6,8 @@
 %\author{Murman Gurgenidze}
 %\date{October 2026}
 
+\usepackage{macros}
+
 \begin{document}
 
 \maketitle
@@ -23,5 +25,98 @@ This project will study whether machine learning can control constraint violatio
 Three approaches will be compared: (1) a neural corrector with hard constraint enforcement, (2) learned constraint-damping terms trained through a differentiable solver, and (3) learned constraint-preserving parameterizations, generalizing the vector-potential idea to systems where none is known.
 
 Work proceeds in stages: benchmark on 2D MHD against exact projection and Dedner cleaning, measuring both constraint violation and accuracy of the physical fields; then extend to nonlinear constraints (lattice Yang–Mills, simplified 3+1 gravity), where ML can offer a real advantage. The goal is corrections that recover the true solution, not merely ones that satisfy the constraint.
+
+\subsection{Example: incompressible fluid dynamics}
+
+We start by our original EoM,
+\begin{equation}
+    \partial_t \uu + (\uu \cdot \nab) \uu = - \frac{1}{\rho_0}
+    \nab p + \nu \nabla^2 \uu + {\bf f} = 0\,,
+    \quad \nab \cdot \uu = 0\,.
+\end{equation}
+After rescaling and defining Reynolds number,
+\begin{equation}
+    \partial_t \uu + R \, (\uu \cdot \nab) \uu = - 
+    \nab p + \nu \nabla^2 \uu + {\bf f} = 0\,,
+    \quad \nab \cdot \uu = 0\,.
+\end{equation}
+This provides a closed system where $p$ should be chosen
+uniquely to enforce divergence-free.
+
+Let's rewrite this as \cite{Chorin1968Numerical}
+\begin{equation}
+    \partial_t \uu + \nab p = {\cal F}_i = R (\uu \cdot \nab)
+    \uu + \nu \nabla^2 \uu + {\bf f}\,.
+\end{equation}
+We can then define an auxiliary field $\uu^\ast$
+that satisfies
+\begin{equation}
+    \partial_t \uu^\ast \simeq
+    \frac{\uu^\ast - \uu^n}
+    {\Delta t} = {\cal F}_i\,,
+    % = \partial_t \uu + \nab p\,,
+\end{equation}
+but it is not divergence free.
+This system allows us to compute $\uu^\ast$
+for a given numerical scheme.
+On the other hand, our original discretized
+equation satisfies
+\begin{equation}
+    \frac{\uu^{n + 1} - \uu^n}{\Delta t}
+    = {\cal F}_i - \nab p \Rightarrow 
+    \uu^{n + 1} = \uu^\ast - \Delta t \,
+    \nab p \Rightarrow 
+    \frac{\uu^{n + 1} - \uu^\ast}{\Delta t}
+    = - \nab p \,.
+\end{equation}
+One can then take the divergence of this 
+field to find
+\begin{equation}
+    \Delta t \, \nab^2 p^{n + 1}
+    = \nab \cdot \uu^\ast \,,
+\end{equation}
+which allows to compute $p^{n+ 1}$.
+
+\subsection{Projection with non zero divergence}
+\begin{equation}
+    \label{eq: div zero}
+    \nab \cdot \uu = 0
+\end{equation}
+One can diffine projection operator in the following way
+\begin{equation}
+    \label{eq: projection}
+    P_{ij}(\kk) = \delta_{ij} - \frac{k_i k_j}{k^2}
+\end{equation}
+
+If the field does not satisfy \ref{eq: div zero} and instead has 
+\begin{equation}
+    \label{eq: div non-zero}
+    \nab \cdot \uu = \rho
+\end{equation}
+
+We ca rewrite the \ref{eq: projection} to following:
+
+\begin{equation}
+    P_{ij} u_j  
+    = \left(\delta_{ij} -a \frac{k_i k_j}{k^2}\right) u_j = \left(u_i -a \frac{u_jk_i k_j}{k^2}\right)  
+\end{equation}
+
+\begin{equation}
+    k_i P_{ij} u_j  
+    = \left(k_i u_i -a \frac{ k_iu_jk_i k_j}{k^2}\right) 
+    = (1 - a)
+\end{equation}
+
+% Chorin proposes the alternate system where $\nab \cdot \uu \neq 0$,
+% \begin{equation}
+%    \partial_t \rho + \nab \cdot \uu^\ast = 0\,, 
+%    \quad
+%    \partial_t \uu^\ast + R \, (\uu^\ast \cdot \nab) \uu ^\ast= - 
+%     \nab p^\ast + \nu \nabla^2 \uu^\ast + {\bf f} = 0\,,
+%     \quad p^\ast = \rho^\ast / \delta\,.
+% \end{equation}
+
+\bibliography{library}
+\bibliographystyle{unsrt}
 
 \end{document}
