@@ -5,6 +5,7 @@
 \title{Solving PDEs with constraints}
 %\author{Murman Gurgenidze}
 %\date{October 2026}
+\usepackage{amsmath}
 
 \usepackage{macros}
 
@@ -26,86 +27,68 @@ Three approaches will be compared: (1) a neural corrector with hard constraint e
 
 Work proceeds in stages: benchmark on 2D MHD against exact projection and Dedner cleaning, measuring both constraint violation and accuracy of the physical fields; then extend to nonlinear constraints (lattice Yang–Mills, simplified 3+1 gravity), where ML can offer a real advantage. The goal is corrections that recover the true solution, not merely ones that satisfy the constraint.
 
-\subsection{Example: incompressible fluid dynamics}
+\section{Example: incompressible fluid dynamics}
 
 We start by our original EoM,
 \begin{equation}
     \partial_t \uu + (\uu \cdot \nab) \uu = - \frac{1}{\rho_0}
     \nab p + \nu \nabla^2 \uu + {\bf f} = 0\,,
-    \quad \nab \cdot \uu = 0\,.
+    \quad \nab \cdot \uu = 0\,,
 \end{equation}
-After rescaling and defining Reynolds number,
+where $\rho_0$ is a constant.
+After rescaling $\uu \to \uu / U$, $p \to p / (\rho U^2)$, ${\bf f} \to L {\bf f}/(U^2)$, $t \to U t / L$, $\nab \to \nab L$,
+and defining Reynolds number, Re$= UL / \nu$,
 \begin{equation}
-    \partial_t \uu + R \, (\uu \cdot \nab) \uu = - 
-    \nab p + \nu \nabla^2 \uu + {\bf f} = 0\,,
+    \partial_t \uu + (\uu \cdot \nab) \uu = - 
+    \nab p + \frac{1}{{\rm Re}} \nabla^2 \uu + {\bf f} = 0\,,
     \quad \nab \cdot \uu = 0\,.
 \end{equation}
 This provides a closed system where $p$ should be chosen
 uniquely to enforce divergence-free.
 
+\subsection{Chorin decomposition}
+
 Let's rewrite this as \cite{Chorin1968Numerical}
 \begin{equation}
-    \partial_t \uu + \nab p = {\cal F}_i = R (\uu \cdot \nab)
-    \uu + \nu \nabla^2 \uu + {\bf f}\,.
+    \partial_t \uu + \nab p = {\cal F}_i =  \uu \cdot \nab
+    \uu + \frac{1}{\rm Re} \nabla^2 \uu + {\bf f}\,.
 \end{equation}
 We can then define an auxiliary field $\uu^\ast$
 that satisfies
 \begin{equation}
-    \partial_t \uu^\ast \simeq
+    \partial_t \uu^\ast \simeq \frac{c_{n+1}
+    \uu^\ast - c_m \uu^m}{\Delta t}
+    \simeq
     \frac{\uu^\ast - \uu^n}
     {\Delta t} = {\cal F}_i\,,
     % = \partial_t \uu + \nab p\,,
 \end{equation}
-but it is not divergence free.
+where $c_\ell$ are constants that are fixed
+by the choice of the finite difference
+scheme, with $\ell = n + 1, n, n - 1, \dots$
+For example, $c_{n + 1} = c_n = 1$ and $c_m = 0$ for $m < n$ in Euler's method,
+corresponding to the third approximation above.
+Note that $\uu^m$ are all divergence free, but $\uu^\ast$ is not.
+
 This system allows us to compute $\uu^\ast$
 for a given numerical scheme.
 On the other hand, our original discretized
 equation satisfies
 \begin{equation}
-    \frac{\uu^{n + 1} - \uu^n}{\Delta t}
+    \frac{c_{n + 1} \uu^{n + 1} - c_m \uu^m}{\Delta t}
     = {\cal F}_i - \nab p \Rightarrow 
-    \uu^{n + 1} = \uu^\ast - \Delta t \,
+    \uu^{n + 1} = \uu^\ast - c^{-1}_{n + 1} \Delta t \,
     \nab p \Rightarrow 
-    \frac{\uu^{n + 1} - \uu^\ast}{\Delta t}
+    c_{n + 1} \frac{\uu^{n + 1} - \uu^\ast}{\Delta t}
     = - \nab p \,.
 \end{equation}
 One can then take the divergence of this 
 field to find
 \begin{equation}
-    \Delta t \, \nab^2 p^{n + 1}
+    c^{-1}_{n + 1} \Delta t \, \nab^2 p^{n + 1}
     = \nab \cdot \uu^\ast \,,
 \end{equation}
 which allows to compute $p^{n+ 1}$.
-
-\subsection{Projection with non zero divergence}
-\begin{equation}
-    \label{eq: div zero}
-    \nab \cdot \uu = 0
-\end{equation}
-One can diffine projection operator in the following way
-\begin{equation}
-    \label{eq: projection}
-    P_{ij}(\kk) = \delta_{ij} - \frac{k_i k_j}{k^2}
-\end{equation}
-
-If the field does not satisfy \ref{eq: div zero} and instead has 
-\begin{equation}
-    \label{eq: div non-zero}
-    \nab \cdot \uu = \rho
-\end{equation}
-
-We ca rewrite the \ref{eq: projection} to following:
-
-\begin{equation}
-    P_{ij} u_j  
-    = \left(\delta_{ij} -a \frac{k_i k_j}{k^2}\right) u_j = \left(u_i -a \frac{u_jk_i k_j}{k^2}\right)  
-\end{equation}
-
-\begin{equation}
-    k_i P_{ij} u_j  
-    = \left(k_i u_i -a \frac{ k_iu_jk_i k_j}{k^2}\right) 
-    = (1 - a)
-\end{equation}
 
 % Chorin proposes the alternate system where $\nab \cdot \uu \neq 0$,
 % \begin{equation}
@@ -115,6 +98,250 @@ We ca rewrite the \ref{eq: projection} to following:
 %     \nab p^\ast + \nu \nabla^2 \uu^\ast + {\bf f} = 0\,,
 %     \quad p^\ast = \rho^\ast / \delta\,.
 % \end{equation}
+
+\subsection{Leray projection}
+
+% \subsection{Projection with non zero divergence}
+% \begin{equation}
+%     \label{eq: div zero}
+%     \nab \cdot \uu = 0
+% \end{equation}
+% One can define projection operator in the following way
+% \begin{equation}
+%     \label{eq: projection}
+%     P_{ij}(\kk) = \delta_{ij} - \frac{k_i k_j}{k^2}
+% \end{equation}
+
+% If the field does not satisfy \ref{eq: div zero} and instead has 
+% \begin{equation}
+%     \label{eq: div non-zero}
+%     \nab \cdot \uu = \rho
+% \end{equation}
+
+% We ca rewrite the \ref{eq: projection} to following:
+
+% \begin{equation}
+%     P_{ij} u_j  
+%     = \left(\delta_{ij} -a \frac{k_i k_j}{k^2}\right) u_j = \left(u_i -a \frac{u_jk_i k_j}{k^2}\right)  
+% \end{equation}
+
+% \begin{equation}
+%     k_i P_{ij} u_j  
+%     = \left(k_i u_i -a \frac{ k_iu_jk_i k_j}{k^2}\right) 
+%     = (1 - a) (\uu \cdot \kk) = \rho
+% \end{equation}
+
+% From \ref{eq: div non-zero} in Fourier space we have $i \kk \uu = \tilde{\rho} $
+
+Leray projection allows to extract the divergence-free component 
+of any vector field, $\uu$,
+\begin{equation}
+    \label{eq: div zero}
+    \nab \cdot \uu = 0
+\end{equation}
+One can define the projection operator in Fourier space as
+\begin{equation}
+    \label{eq: projection}
+    P_{ij}(\kk) = \delta_{ij} -
+    % \frac{k_i k_j}{k^2},
+    \hat k_i \hat k_j\,, \quad \hat k_i = \frac{k_i}{k}\,,
+    \quad \kk \neq 0 .
+\end{equation}
+Then, if a field computed numerically, $\uu^\ast$, does not satisfy the
+divergence-free condition, i.e., $\hat k_i u_i^\ast (\kk) \neq 0$,
+it can be projected to the physical one by taking
+Leray projection,
+\begin{equation}
+    u_i (\kk) = P_{ij} (\kk)\, u_j^\ast (\kk)\,.
+\end{equation}
+Indeed, this field automatically satisfies $\nab \cdot \uu = 0$:
+\begin{equation}
+    \hat k_i u_i (\kk) = \hat k_i P_{ij} (\kk) \, u_j^\ast (\kk) = 
+    (\hat k_j - \hat k_j) \, u_j^\ast (\kk) = 0\,.
+\end{equation}
+
+The Leray projection can be generalized to a field with non-zero
+divergence, determined by a scalar field $\rho$,
+% If the field does not satisfy \Eq{eq: div zero} and instead has
+\begin{equation}
+    \label{eq: div non-zero}
+    \nab \cdot \uu = \rho \,.
+\end{equation}
+Then, in Fourier space, with $\tilde{\uu} = \mathcal{F}(\uu)$ and
+$\tilde{\rho} = \mathcal{F}(\rho)$,
+\begin{equation}
+    \label{eq: div fourier}
+    i\, \kk \cdot \tilde{\uu} = \tilde{\rho} .
+\end{equation}
+To separate the divergence, we generalise \ref{eq: projection} with a scalar $a$:
+\begin{equation}
+    \label{eq: projection a}
+    P_{ij} \tilde{u}_j
+    = \left(\delta_{ij} - a\, \frac{k_i k_j}{k^2}\right) \tilde{u}_j
+    = \tilde{u}_i - a\, \frac{k_i \left(k_j \tilde{u}_j\right)}{k^2} .
+\end{equation}
+Using $k_i k_i = k^2$ and \ref{eq: div fourier}, its divergence is
+\begin{equation}
+    \label{eq: div projection a}
+    i\, k_i P_{ij} \tilde{u}_j
+    = i \left(k_i \tilde{u}_i - a\, \frac{k_i k_i \, k_j \tilde{u}_j}{k^2}\right)
+    = (1 - a)\, i\, \kk \cdot \tilde{\uu}
+    = (1 - a)\, \tilde{\rho} .
+\end{equation}
+Hence $P_{ij}\tilde{u}_j$ retains the fraction $(1-a)$ of the divergence, while the
+remainder $\tilde{u}_i - P_{ij}\tilde{u}_j = a\, k_i k_j \tilde{u}_j / k^2$ carries
+$a\,\tilde{\rho}$. Requiring the projected part to be solenoidal for arbitrary
+$\tilde{\rho}$ gives
+\begin{equation}
+    \label{eq: a value}
+    a = 1 ,
+\end{equation}
+which recovers \ref{eq: projection}. 
+The field therefore splits as
+\begin{equation}
+    \label{eq: split}
+    \tilde{u}_i
+    = \underbrace{\left(\delta_{ij} - \frac{k_i k_j}{k^2}\right)\tilde{u}_j}_{\tilde{u}_i^{s}}
+    + \underbrace{\frac{k_i k_j}{k^2}\,\tilde{u}_j}_{\tilde{u}_i^{d}} ,
+\end{equation}
+where, using $k_j \tilde{u}_j = -i\,\tilde{\rho}$ from \ref{eq: div fourier},
+\begin{equation}
+    \label{eq: dilatational part}
+    \tilde{u}_i^{d} = -\frac{i\, k_i\, \tilde{\rho}}{k^2},
+    \qquad
+    i\, k_i \tilde{u}_i^{s} = 0,
+    \qquad
+    i\, k_i \tilde{u}_i^{d} = \tilde{\rho} .
+\end{equation}
+The mean mode $\kk = 0$ is excluded from \ref{eq: split} and requires
+$\tilde{\rho}(\mathbf{0}) = 0$.
+
+\section{Example: MHD with large conductivity}
+
+\subsection{Ideal MHD}
+
+Let us first consider the case of ideal MHD, i.e., the dynamics of charged/ionized
+fluids with infinite conductivity.
+Ohm's law provides the freeze-in condition for the electric field,
+\begin{equation}
+    \EE \simeq - \uu \times \BB\,. \label{ideal_MHD}
+\end{equation}
+On the other hand, Maxwell equation,
+\begin{equation}
+    \partial_t \EE = \nab \times \BB - \JJ\,,
+\end{equation}
+can be reduced to the following expression, under the assumption that
+the displacement current is negligible compared to the term $\sigma \EE$
+that appears in $\JJ$ from Ohm's law,
+\begin{equation}
+    \JJ = \nab \times \BB\,.
+\end{equation}
+
+Let us now consider relativistic Gauss' law, taking $\gamma \to 1$ \cite{RoperPol:2025lgc},
+\begin{equation} \label{Gauss}
+    \nab \cdot \EE = J^0 = \rho_e + \uu \cdot \JJ\,,
+\end{equation}
+where $\rho_e$ is the charge density.
+Taking divergence of \Eq{ideal_MHD}, we find a closed expression for $\rho_e$:
+\begin{equation}
+    \nab \cdot \EE = - \nab \cdot (\uu \times \BB) = - \BB \cdot \oom + \uu
+    \cdot \JJ = \rho_e + \uu \cdot \JJ \Rightarrow \rho_e = 
+    - \BB \cdot \oom\,,
+\end{equation}
+where $\oom = \nab \times \uu$ is the vorticity.
+Therefore, in ideal MHD, the charge density cannot be arbitrarily set to zero
+under the assumption of quasineutralitiy and it needs to be consistent
+with the evolution of ideal MHD.
+
+The induction equation is
+\begin{equation}
+    \partial_t \BB = - \nab \times \EE = \nab \times (\uu \times \BB)
+    = (\BB \cdot \nab) \uu - \BB (\nab \cdot \uu) - (\uu \cdot \nab) \BB\,.
+\end{equation}
+Finally, the Lorentz force is
+\begin{align}
+    f_{\rm Lor}^0 = &\, \EE \cdot \JJ = - (\uu \times \BB) \cdot \JJ = \uu \cdot 
+    (\JJ \times \BB)\,, \\
+    % = - \epsilon_{ijk} u_j B_k \epsilon_{ilm} \partial_l B_m
+    % = - (\delta_{jl} \delta_{km} - \delta_{jm} \delta_{kl})
+    % u_j B_k \partial_l B_m = u_m B_l \partial_l B_m - u_l B_m \partial_l B_m
+    f_{\rm Lor}^i = &\, J^0 E_i + (\JJ \times \BB)_i = 
+    - (\rho_e + \uu \cdot \JJ) (\uu \times \BB)_i  + (\JJ \times \BB)_i\,.
+\end{align}
+We note that the contribution from $\rho_e$ to the Lorentz force cannot be
+arbitrarily neglected.
+This is, however, usually done in MHD systems under the assumption of small
+fluid perturbations, such that $\EE \sim {\cal O} (\uu)$, $J^0 \sim {\cal O} |u|$
+and, hence, $J^0 |\EE| \sim {\cal O} (u^2)$.
+
+In general, for ideal MHD systems, the electric field should satisfy
+\begin{equation}
+    \nab \cdot \EE = J^0 = - \BB \cdot \oom + \uu \cdot \JJ\,,
+\end{equation}
+which is automatically satisfied when the electric field is not a dynamical
+variable.
+
+\subsection{Resistive MHD}
+
+This can be generalized to a system with large but finite conductivity.
+Then, Ohm's law is \cite{RoperPol:2025lgc}
+\begin{equation}
+    \EE = \eta \, (\JJ - \rho_e \uu) - \uu \times \BB\,, \label{resis_Ohm}
+\end{equation}
+where $\eta = 1/\sigma$ is small.
+Note that setting $\eta = 0$ recovers the ideal MHD limit.
+
+Taking the divergence of \Eq{resis_Ohm}, together with Gauss' law \Eq{Gauss},
+we get
+\begin{equation}
+    \nab \cdot \EE = - \nab \cdot (\eta \rho_e \uu) - \BB \cdot \oom +
+    \uu \cdot \JJ = \rho_e + \uu \cdot \JJ 
+    \Rightarrow \rho_e + \nab \cdot (\eta \rho_e \uu) = - \BB \cdot \oom\,,
+\end{equation}
+which now provides a differential equation that $\rho_e$ should satisfy.
+
+The induction equation and the Lorentz force become
+\begin{equation}
+    \partial_t \BB = \nab \times (\uu \times \BB - \eta \JJ + \eta \rho_e \uu)\,,
+\end{equation}
+\begin{align}
+    f_{\rm Lor}^0 = &\, \EE \cdot \JJ = \uu \cdot (\JJ \times \BB) +
+    \eta \JJ^2 - \eta \rho_e \uu \cdot \JJ\,, \\ 
+    f_{\rm Lor}^i = &\, J^0 E_i + (\JJ \times \BB)_i
+    = (\rho_e + \uu \cdot \JJ) (\eta \JJ - \eta \rho_e \uu - \uu \times \BB)
+    + (\JJ \times \BB)_i \,.
+\end{align}
+
+\subsection{Displacement current}
+
+More interesting is the case when the displacement current cannot be neglected.
+In this case, Amp\`ere's law does no longer act as a constrain equation ensuring
+that $\JJ = \nab \times \BB$, but instead provides a dynamical equation
+to advance $\EE$,
+\begin{equation}
+    \partial_t \EE = \nab \times \BB - \JJ\,.
+\end{equation}
+Therefore, $\JJ$ is not in generally known and it needs to be computed via Ohm's law
+\begin{equation}
+    \JJ = \rho_e \uu +  \sigma \, (\EE + \uu \times \BB)\,.
+\end{equation}
+This also implies that $\EE$, and hence, $\nab \cdot \EE$,
+is not fixed by Ohm's law, which was providing an equation for $\rho_e$
+as a function
+of the other fields in previous cases.
+In this case, $\rho_e$ is required to follow the continuity equation,
+\begin{equation}
+    \partial_\mu J^\mu = \partial_t J^0 + \nab \cdot \JJ = 0\,,
+\end{equation}
+which is equivalent to
+\begin{equation}
+    \partial_t J^0 + \nab \cdot (\rho_e \uu) +
+    \sigma \bigl[J^0 + \BB \cdot \oom - \uu \cdot (\nab \times \BB) \bigr]
+    = 0 \,.
+\end{equation}
+
+\section{Divergence cleaning in MHD}
+In \cite{Munz:2000xu,Dedner:2001jc,Komissarov:2007wk} it was pointed out that numerical errors arising from the imprecise treatment of the divergence equations of the $\BB$ and $\EE$ can be mitigated with the use of Generalized Lagrange Multiplayer (GLM) method,
 
 \bibliography{library}
 \bibliographystyle{unsrt}
