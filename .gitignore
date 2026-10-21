@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Experiment outputs
+data/
+*.npz
+*.h5
+
+# runs/: only the Pencil Code runs are tracked
+runs/*
+!runs/pencil/
+
+# Pencil run src/ directories: symlinks into ~/pencil-code plus build products.
+# Keep each run's *.local (grid, cores, modules) and the two modified sources
+# in disp_current_test, which all other runs link to. Outputs (data/) are ignored above.
+runs/pencil/**/src/*
+!runs/pencil/**/src/*.local
+!runs/pencil/disp_current_test/src/density.f90
+!runs/pencil/disp_current_test/src/special/
+runs/pencil/disp_current_test/src/special/*
+!runs/pencil/disp_current_test/src/special/disp_current.f90
+
+# Pencil data files outside data/ (k.dat, saved time series, sample reference outputs)
+# and run-state markers written by start.x/run.x
+runs/pencil/**/*.dat
+runs/pencil/**/*.ref
+runs/pencil/**/COMPLETED
+runs/pencil/**/LOCK
+runs/pencil/**/NEVERLOCK
+runs/pencil/**/*.tmp
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.pdf
