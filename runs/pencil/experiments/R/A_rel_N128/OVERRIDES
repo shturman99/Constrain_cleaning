@@ -1,0 +1,4 @@
+run:run_pars:nt=600
+run:viscosity_run_pars:nu=2e-2
+start:hydro_init_pars:ampluu=0.2
+start:special_init_pars:initee='ohmic', eta_init_ohmic=8.4e-2

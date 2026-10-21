@@ -1,0 +1,3 @@
+start:hydro_init_pars:ampluu=0.2
+start:special_init_pars:initee='zero'
+run:magnetic_run_pars:eta=1e-2

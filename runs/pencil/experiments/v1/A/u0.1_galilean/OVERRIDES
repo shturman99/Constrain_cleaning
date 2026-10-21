@@ -1,0 +1,6 @@
+run:run_pars:nt=600
+run:viscosity_run_pars:nu=2e-2
+start:hydro_init_pars:ampluu=0.2
+start:special_init_pars:initee='zero'
+start:hydro_init_pars:ampluu=0.1
+run:special_run_pars:J0_model='galilean'

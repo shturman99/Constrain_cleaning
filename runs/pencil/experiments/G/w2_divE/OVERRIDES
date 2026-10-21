@@ -1,0 +1,3 @@
+run:run_pars:nt=600
+run:viscosity_run_pars:nu=2e-2
+run:special_run_pars:lJ0_divE_in_divJ=T

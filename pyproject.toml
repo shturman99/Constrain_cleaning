@@ -1,0 +1,27 @@
+[project]
+name = "constrain-cleaning"
+version = "0.1.0"
+description = "ML approaches to controlling constraint violation in PDE solvers"
+requires-python = ">=3.12"
+dependencies = [
+    "jax",
+    "numpy",
+    "matplotlib",
+    "equinox>=0.13.8",
+    "optax>=0.2.8",
+]
+
+[project.optional-dependencies]
+cuda = ["jax[cuda12]"]
+
+[dependency-groups]
+dev = [
+    "h5py>=3.16.0",
+    "ipykernel>=7.4.0",
+    "lazy-loader>=0.6",
+    "pytest",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

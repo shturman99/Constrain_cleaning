@@ -1,0 +1,2539 @@
+! $Id$
+!
+!  Electric field, dE/dt = curlB-mu0*J, originally only for the special case
+!  of no fluid induction, but now fluid motions are also included.
+!
+!  25-feb-07/axel: adapted from nospecial.f90
+!
+!** AUTOMATIC CPARAM.INC GENERATION ****************************
+! Declare (for generation of special_dummies.inc) the number of f array
+! variables and auxiliary variables added by this module
+!
+! CPARAM logical, parameter :: lspecial = .true.
+!
+! MVAR CONTRIBUTION 4
+! MAUX CONTRIBUTION 0
+!
+! PENCILS PROVIDED e2; edot2; el(3); a0; ga0(3); del2ee(3); curlE(3)
+! PENCILS PROVIDED udotE;
+! PENCILS PROVIDED ExB(3); J0
+! PENCILS PROVIDED rhoe, divJ, divE, gGamma(3); sigE, sigB; eb; count_eb0
+! PENCILS PROVIDED boost; gam_EB; eprime; bprime; jprime; GammaY
+! PENCILS PROVIDED jj_higgsY(3); rhoe_higgsY
+! PENCILS EXPECTED phi, infl_phi, dphi, infl_dphi, gphi(3); cov_der(4,4)
+! PENCILS EXPECTED curlb(3), jj_ohm(3), phi_doublet(3)
+! PENCILS EXPECTED gpsi(3), dpsi, ext_force(4)
+!***************************************************************
+!
+module Special
+!
+  use Cdata
+  use Quiet
+  use Messages
+!
+  implicit none
+!
+  include '../special.h'
+!
+! input parameters
+!
+  real, dimension (ninit) :: amplee=0.0 !, kx_aa=1.0, ky_aa=1.0, kz_aa=1.0
+  real, dimension (nx) :: etaSchw=0., etaArn=0., diffus_etaSchw=0., dtsrc_sigE=0.
+  real :: alpf=0., alpfpsi=0.
+  real :: ampl_ex=0.0, ampl_ey=0.0, ampl_ez=0.0, ampl_a0=0.0
+  real :: kx_ex=0.0, kx_ey=0.0, kx_ez=0.0
+  real :: ky_ex=0.0, ky_ey=0.0, ky_ez=0.0
+  real :: kz_ex=0.0, kz_ey=0.0, kz_ez=0.0
+  real :: kx_a0=0.0, ky_a0=0.0, kz_a0=0.0
+  real :: phase_ex=0.0, phase_ey=0.0, phase_ez=0.0, phase_a0=0.0
+  real :: initpower_ee=0.0, initpower2_ee=0.0
+  real :: cutoff_ee=0.0, ncutoff_ee=0.0, kpeak_ee=0.0
+  real :: relhel_ee=0.0, kgaussian_ee=0.0
+  real :: ampla0=0.0, initpower_a0=0.0, initpower2_a0=0.0
+  real :: cutoff_a0=0.0, ncutoff_a0=0.0, kpeak_a0=0.0
+  real :: relhel_a0=0.0, kgaussian_a0=0.0, eta_ee=0.0
+  real :: sigE_prefactor=1., sigB_prefactor=1., sigE_Arnold_prefactor=1.
+  real :: charge_flow_factor=1., charge_flow_limiter=1.
+  real :: weight_longitudinalE=2.0, mass_chi=0.
+  real :: coupl_gy=.345 ! electroweak SU(2) x U(1) coupling of Higgs to U(1)
+  real :: je_heating_factor=1.
+  logical :: luse_scale_factor_in_sigma=.false., lapply_Gamma_corr=.true.
+  logical, pointer :: lohm_evolve, lphi_doublet, lphi_hypercharge
+  logical, pointer :: lwaterfall
+  logical, pointer :: lrelativistic_eos
+  logical, pointer :: lsigE_const
+  logical, pointer :: lsolve_for_phi
+  real, pointer :: eta, Hscript, echarge, sigEm_all, sigBm_all, e2m_all, j2m_all
+  integer :: iGamma=0, ia0=0, idiva_name=0, ieedot=0, iedotx=0, iedoty=0, iedotz=0
+  integer :: idivE=0, isigE=0, isigB=0
+  logical :: llongitudinalE=.true., llorenz_gauge_disp=.false., lskip_projection_ee=.false.
+  logical :: lscale_tobox=.true., lskip_projection_a0=.false.
+  logical :: lpower_profile_file=.false.
+  logical :: lvectorpotential=.false.
+  logical, target :: lphi_hom=.false., lphi_linear_regime=.false.   !AB: these variables should have been defined in backreaction.
+  logical, target :: lpsi_hom=.false.
+  logical :: ladvance_ee=.true.         !PAR_DOC: can turn off time advance of E.
+  logical :: lohmic_heating_ee=.true.   !PAR_DOC: positive definite part of heating with $J^2/sigE$.
+  logical :: lohmic_heating_justee=.false. !PAR_DOC: positive definite heating with just $E^2*sigE$.
+  logical :: lno_noise_ee=.false.
+  logical, target :: lnoncollinear_EB=.false., lnoncollinear_EB_aver=.false.
+  logical :: lcollinear_EB=.false., lcollinear_EB_aver=.false.
+  logical :: leedot_as_aux=.false., lcurlyA=.true., lsolve_chargedensity=.false.
+  logical :: ldivE_as_aux=.false., lsigE_as_aux=.false., lsigB_as_aux=.false.
+  logical :: lrandom_ampl_ee=.false., lfixed_phase_ee=.false., lallow_bprime_zero=.true.
+  logical :: lswitch_off_divJ=.false., lswitch_off_Gamma=.false.
+  logical, target :: lmass_suppression=.false.
+  logical :: loverride_c_light=.false., ldensity_add_je_heating=.false., llorentzforce_ee=.false.
+  logical :: lcorrect_sign_adphiB_term=.false. !PAR_DOC: correct sign adphiB_term
+  logical :: lignore_adphiB_term_in_MHD_current=.true. !PAR_DOC: correct sign adphiB_term
+  character (len=labellen) :: inita0='zero'
+  logical :: lpi_vecpot=.false.
+!
+!  PAR_DOC: Gauss-law preserving formulation (at the moment without J) evolving A_e.
+!  PAR_DOC: Pi = E + alpf*phi*B = curl A_e.
+!  PAR_DOC: dA_e/dt =  B - alpf*phi*E,   E = curl A_e - alpf*phi*curl A,   dA/dt = -E,
+!  PAR_DOC: so div(Pi) = div(curl C) = 0 
+!
+  integer :: iaae=0, iphi_f=0
+  logical, pointer :: lbb_as_comaux
+  character (len=labellen), dimension(ninit) :: initee='nothing'
+  character (len=labellen) :: power_filename='power_profile.dat'
+  character (len=labellen) :: replace_Schwinger_by_Arnold='replace_at_end_of_reheating'
+!
+!  lsolve_J0: f(irhoe) holds J^0 (not rho_e), with div E = J^0 = rho_e / gamma + u.J.
+!  Ohm: J /gamma = rho_e*u + sigma*(E+uxB), giving rho_e = J^0 /gamma - sigma*u.E.
+!  Equivalently J = J^0*u + gamma*sigma*[E + uxB - (u.E)*u]  (RoperPol+Midiri 2025, Sec. 5.3).
+!  Continuity: dJ^0/dt = -div J, with div E replaced by J^0 (Gauss) in div J.
+!  Lorentz four-force f^0 = E.J, f = J^0*E + JxB goes into p%ext_force, so it needs
+!  lext_force=T (hydro), and llorentzforce=F (magnetic) to avoid counting JxB twice.
+!  The relativistic prefactors (Sec. 6.4) are applied in hydro/density
+!  when lrelativistic=T (hydro) and lrelativistic_eos=T (density).
+!  In both init and run pars: set it in start.in too (initial J^0 with ghost zones of E updated).
+!
+  logical :: lsolve_J0=.false. !PAR_DOC: evolve $J^0=\nab\cdot\Ev$ instead of $\rho_e$,
+    !PAR_DOC: using the covariant Ohm's law $\Jv=J^0\uv+\gamma\sigma[\Ev+\uv\times\Bv
+    !PAR_DOC: -(\uv\cdot\Ev)\uv]$, $\rho_e=J^0/\gamma-\sigma\uv\cdot\Ev$, and the Lorentz
+    !PAR_DOC: four-force (needs \code{lext\_force=T} and \code{llorentzforce=F}).
+!
+!  Experiment switches for lsolve_J0 (run pars, except the initial perturbation):
+!  J0_model='relativistic': as above; 'gamma1': gamma=1 (keeps the -(u.E)u term);
+!    'galilean': J^0=rho_e, J = J^0*u + sigma*(E+uxB).
+!  lJ0_no_disp: no displacement current, J = curl B, E = J/(gamma*sigma) - uxB from Ohm's law
+!    (charge-flow term eta*rho_e*u dropped), J^0 = div E evaluated analytically.
+!  lJ0_divE_in_divJ: use div E itself (not J^0) in div J, i.e. no gamma*sigma damping of div E - J^0.
+!  ampl_J0pert, k_J0pert: initial Gauss violation, J^0 = div E + ampl_J0pert*sin(k_J0pert*y).
+!
+  character (len=labellen) :: J0_model='relativistic' !PAR_DOC: \code{'relativistic'},
+    !PAR_DOC: \code{'gamma1'} ($\gamma=1$) or \code{'galilean'} ($J^0=\rho_e$) Ohm's law with \code{lsolve\_J0}.
+  logical :: lJ0_no_disp=.false. !PAR_DOC: with \code{lsolve\_J0}, drop the displacement current:
+    !PAR_DOC: $\Jv=\nab\times\Bv$ and $\Ev$ from Ohm's law.
+  logical :: lJ0_divE_in_divJ=.false. !PAR_DOC: with \code{lsolve\_J0}, use $\nab\cdot\Ev$ rather than
+    !PAR_DOC: $J^0$ in $\nab\cdot\Jv$ (no damping of the Gauss residual).
+  real :: ampl_J0pert=0. !PAR_DOC: amplitude of an initial Gauss violation added to $J^0$.
+  real :: k_J0pert=1.    !PAR_DOC: wavenumber (in $y$) of that initial Gauss violation.
+  real :: eta_init_ohmic=0. !PAR_DOC: $\eta=1/\sigma$ for \code{initee='ohmic'},
+    !PAR_DOC: $\Ev=\eta\,\nab\times\Bv/\gamma-\uv\times\Bv$ (set it to the run's \code{eta}).
+!
+  namelist /special_init_pars/ &
+    lpi_vecpot, &
+    initee, inita0, alpf, &
+    ampl_ex, ampl_ey, ampl_ez, ampl_a0, &
+    kx_ex, kx_ey, kx_ez, &
+    ky_ex, ky_ey, ky_ez, &
+    kz_ex, kz_ey, kz_ez, &
+    kx_a0, ky_a0, kz_a0, &
+    phase_ex, phase_ey, phase_ez, phase_a0, &
+    llongitudinalE, llorenz_gauge_disp, lphi_hom, lphi_linear_regime, &
+    amplee, initpower_ee, initpower2_ee, lscale_tobox, &
+    cutoff_ee, ncutoff_ee, kpeak_ee, relhel_ee, kgaussian_ee, &
+    ampla0, initpower_a0, initpower2_a0, lno_noise_ee, &
+    cutoff_a0, ncutoff_a0, kpeak_a0, relhel_a0, kgaussian_a0, &
+    leedot_as_aux, ldivE_as_aux, lsigE_as_aux, lsigB_as_aux, &
+    lsolve_chargedensity, weight_longitudinalE, lswitch_off_Gamma, &
+    lrandom_ampl_ee, lfixed_phase_ee, lskip_projection_ee, &
+    luse_scale_factor_in_sigma, lpower_profile_file, power_filename, &
+    coupl_gy, alpfpsi, lpsi_hom, loverride_c_light, &
+    ldensity_add_je_heating, llorentzforce_ee, lsolve_J0, ampl_J0pert, k_J0pert, eta_init_ohmic
+!
+  ! run parameters
+  real :: beta_inflation=0., rescale_ee=1., vA_limit=0., eta_given=impossible
+  real :: cdt_sigE=1.   !PAR_DOC: time step constraint from 1/sigE
+  real :: sigEmax=impossible       !PAR_DOC: time step constraint from 1/sigE
+  real :: sigE_ceiling=impossible  !PAR_DOC: ceiling
+  real :: sigE_const_value=impossible  !PAR_DOC: constant value if set
+  real :: etaSchw_max=impossible   !PAR_DOC: constant value if set
+  real :: lna1_switch_toArnold=impossible  !PAR_DOC: lna value for interpolating to Arnold conductivity
+  real :: lna2_switch_toArnold=impossible  !PAR_DOC: lna value for only using Arnold conductivity
+  logical :: lcharge_flow=.false.          !PAR_DOC: added rhoe*uu contribution to current.
+  logical :: reinitialize_ee=.false.
+  logical :: lresistive_gauge_ee=.false.   !PAR_DOC: possibility of resistive gauge when ladvance_ee=F.
+  logical :: lresistive_gauge_disp=.false. !PAR_DOC: resitive gauge when displacement current is solved for.
+  logical :: ldt_disp_current=.true.  !PAR_DOC: invoke timestep constraint from sigE
+  logical :: llate_reset_el_pencil=.false.  !PAR_DOC: late reset of el pencil, should probably be true in future.
+  logical :: linclude_dphiB_in_MHD=.false.  !PAR_DOC: include dphi*B in MHD approximation
+  logical :: linclude_gphixE_in_MHD=.false.  !PAR_DOC: include gphixE in MHD approximation
+  logical :: lheating_averaged=.false.       !PAR_DOC: compute heating based on averaged electromagnetic fields
+  logical :: lreplace_Schwinger_by_Arnold=.false.  !PAR_DOC: replace Schwinger by Arnold conductivity
+  character (len=labellen) :: aderiv_scaling='table'
+!
+  namelist /special_run_pars/ &
+    alpf, llongitudinalE, llorenz_gauge_disp, lphi_hom, lphi_linear_regime, &
+    leedot_as_aux, ldivE_as_aux, lsigE_as_aux, lsigB_as_aux, &
+    eta_ee, lcurlyA, beta_inflation, sigEmax, sigE_ceiling, &
+    weight_longitudinalE, lswitch_off_divJ, lswitch_off_Gamma, &
+    lnoncollinear_EB, lnoncollinear_EB_aver, luse_scale_factor_in_sigma, &
+    lcollinear_EB, lcollinear_EB_aver, sigE_prefactor, sigB_prefactor, sigE_Arnold_prefactor, &
+    charge_flow_factor, charge_flow_limiter, lcharge_flow, reinitialize_ee, initee, rescale_ee, &
+    lmass_suppression, mass_chi, &
+    lallow_bprime_zero, lapply_Gamma_corr, coupl_gy, lpsi_hom, alpfpsi, &
+    loverride_c_light, ldensity_add_je_heating, je_heating_factor, &
+    lresistive_gauge_ee, llorentzforce_ee, aderiv_scaling, vA_limit, &
+    lohmic_heating_ee, lohmic_heating_justee, sigE_const_value, &
+    ladvance_ee, eta_given, ldt_disp_current, cdt_sigE, lheating_averaged, &
+    lresistive_gauge_disp, etaSchw_max, llate_reset_el_pencil, &
+    linclude_dphiB_in_MHD, linclude_gphixE_in_MHD, lreplace_Schwinger_by_Arnold, &
+    lna1_switch_toArnold, lna2_switch_toArnold, replace_Schwinger_by_Arnold, &
+    lcorrect_sign_adphiB_term, lignore_adphiB_term_in_MHD_current, &
+    lsolve_J0, J0_model, lJ0_no_disp, lJ0_divE_in_divJ
+!
+! Declare any index variables necessary for main or
+!
+  real :: c_light2
+!
+! other variables (needs to be consistent with reset list below)
+!
+  integer :: idiag_EEEM=0       ! DIAG_DOC: $\left<\Ev^2+\Bv^2\right>/2$
+  integer :: idiag_erms=0       ! DIAG_DOC: $\left<\Ev^2\right>^{1/2}$
+  integer :: idiag_eprimerms=0  ! DIAG_DOC: $\left<(E')^2\right>^{1/2}$
+  integer :: idiag_bprimerms=0  ! DIAG_DOC: $\left<(B')^2\right>^{1/2}$
+  integer :: idiag_jprimerms=0  ! DIAG_DOC: $\left<(J')^2\right>^{1/2}$
+  integer :: idiag_gam_EBrms=0  ! DIAG_DOC: $\left<(\gamma')^2\right>^{1/2}$
+  integer :: idiag_boostprms=0  ! DIAG_DOC: $\left<\mbox{boost}^2\right>^{1/2}$
+  integer :: idiag_edotrms=0    ! DIAG_DOC: $\left<\dot{\Ev}^2\right>^{1/2}$
+  integer :: idiag_emax=0       ! DIAG_DOC: $\max(|\Ev|)$
+  integer :: idiag_a0rms=0      ! DIAG_DOC: $\left<A_0^2\right>^{1/2}$
+  integer :: idiag_grms=0       ! DIAG_DOC: $\left<C-\nabla\cdot\Av\right>^{1/2}$
+  integer :: idiag_da0rms=0     ! DIAG_DOC: $\left<C-\nabla\cdot\Av\right>^{1/2}$
+  integer :: idiag_BcurlEm=0    ! DIAG_DOC: $\left<\Bv\cdot\nabla\times\Ev\right>$
+  integer :: idiag_BcurlBm=0    ! DIAG_DOC: $\left<\Bv\cdot\nabla\times\Bv\right>$
+  integer :: idiag_divJrms=0    ! DIAG_DOC: $\left<\nab\Jv^2\right>^{1/2}$
+  integer :: idiag_divErms=0    ! DIAG_DOC: $\left<\nab\Ev^2\right>^{1/2}$
+  integer :: idiag_rhoerms=0    ! DIAG_DOC: $\left<\rho_e^2\right>^{1/2}$
+  integer :: idiag_divJm=0      ! DIAG_DOC: $\left<\nab\Jv\right>$
+  integer :: idiag_divEm=0      ! DIAG_DOC: $\left<\nab\Ev\right>$
+  integer :: idiag_rhoem=0      ! DIAG_DOC: $\left<\rho_e\right>$
+  integer :: idiag_J0rms=0      ! DIAG_DOC: $\left<(J^0)^2\right>^{1/2}$
+  integer :: idiag_gaussJ0rms=0 ! DIAG_DOC: $\left<(\nab\cdot\Ev-J^0)^2\right>^{1/2}$
+  integer :: idiag_gaussJ0max=0 ! DIAG_DOC: $\max|\nab\cdot\Ev-J^0|$
+  integer :: idiag_gaussdamprms=0 ! DIAG_DOC: rms $\gamma\sigma(\nab\cdot\Ev-J^0)$ (Gauss damping in $\nab\cdot\Jv$)
+  integer :: idiag_divJadvrms=0 ! DIAG_DOC: rms $\uv\cdot\nab J^0+J^0\nab\cdot\uv$
+  integer :: idiag_divJohmrms=0 ! DIAG_DOC: rms $\sigma\gamma\nab\cdot\Wv$
+  integer :: idiag_divJgamrms=0 ! DIAG_DOC: rms $\sigma\Wv\cdot\nab\gamma$
+  integer :: idiag_J0urms=0     ! DIAG_DOC: rms $|J^0\uv|$
+  integer :: idiag_Jsigrms=0    ! DIAG_DOC: rms $|\gamma\sigma\Wv|$
+  integer :: idiag_uEm=0        ! DIAG_DOC: $\left<\uv\cdot\Ev\right>$
+  integer :: idiag_uErms=0      ! DIAG_DOC: rms $\uv\cdot\Ev$
+  integer :: idiag_f0m=0        ! DIAG_DOC: $\left<\Ev\cdot\Jv\right>$ ($f^0_{\rm Lor}$)
+  integer :: idiag_f0rms=0      ! DIAG_DOC: rms $\Ev\cdot\Jv$
+  integer :: idiag_fLorrms=0    ! DIAG_DOC: rms $|J^0\Ev+\Jv\times\Bv|$
+  integer :: idiag_fJ0Erms=0    ! DIAG_DOC: rms $|J^0\Ev|$
+  integer :: idiag_fJxBrms=0    ! DIAG_DOC: rms $|\Jv\times\Bv|$
+  integer :: idiag_gammam=0     ! DIAG_DOC: $\left<\gamma\right>$
+  integer :: idiag_gammamax=0   ! DIAG_DOC: $\max\gamma$
+!
+!  Individual terms of the lsolve_J0 equations, kept from calc_pencils for the diagnostics.
+!
+  real, dimension (nx) :: diag_uE=0., diag_J0u2=0., diag_Jsig2=0.
+  real, dimension (nx) :: diag_divJadv=0., diag_divJohm=0., diag_divJgam=0.
+  real, dimension (nx) :: diag_f0=0., diag_fJxB2=0., diag_fJ0E2=0., diag_fLor2=0.
+  integer :: idiag_count_eb0=0  ! DIAG_DOC: $f_\mathrm{EB0}$
+  integer :: idiag_mfpf=0       ! DIAG_DOC: $-f'/f$
+  integer :: idiag_fppf=0       ! DIAG_DOC: $f''/f$
+  integer :: idiag_afact=0      ! DIAG_DOC: $a$ (scale factor)
+  integer :: idiag_constrainteqn=0  ! DIAG_DOC: $<deldotE+>$
+  integer :: idiag_constrainteqnrms=0 ! DIAG_DOC: rms of the pointwise ratio used in constrainteqn
+  integer :: idiag_gausscrms=0  ! DIAG_DOC: rms $\nab\cdot(\Ev+\alpha_f\phi\Bv)$ (needs lbb_as_comaux)
+  integer :: idiag_gaussprms=0  ! DIAG_DOC: rms $(\nab\cdot\Ev+\alpha_f\Bv\cdot\nab\phi)$
+  integer :: idiag_gaussnrms=0  ! DIAG_DOC: rms $\alpha_f\Bv\cdot\nab\phi$
+  integer :: idiag_aaerms=0     ! DIAG_DOC: rms $A_e$
+  integer :: idiag_divphib=0    ! DIAG_DOC: $\left<\nab \cdot (phiB) \right>$
+  integer :: idiag_exm=0        ! DIAG_DOC: $\left<E_x\right>$
+  integer :: idiag_eym=0        ! DIAG_DOC: $\left<E_y\right>$
+  integer :: idiag_ezm=0        ! DIAG_DOC: $\left<E_z\right>$
+  integer :: idiag_etaSchw=0    ! DIAG_DOC: $1/\left<\sigma_\mathrm{E}\right>$
+  integer :: idiag_etaArn=0     ! DIAG_DOC: $1/\left<\sigma_\mathrm{E}\right>_\mathrm{Arnold}$
+  integer :: idiag_dteta=0      ! DIAG_DOC: $dt/cdtv$
+  integer :: idiag_dtsigE=0     ! DIAG_DOC: $dt/cdt\_sigE$
+  integer :: idiag_sigEm=0      ! DIAG_DOC: $\left<\sigma_\mathrm{E}\right>$
+  integer :: idiag_sigBm=0      ! DIAG_DOC: $\left<\sigma_\mathrm{B}\right>$
+  integer :: idiag_sigErms=0    ! DIAG_DOC: $\left<\sigma_\mathrm{E}^2\right>^{1/2}$
+  integer :: idiag_sigBrms=0    ! DIAG_DOC: $\left<\sigma_\mathrm{B}^2\right>^{1/2}$
+  integer :: idiag_sigEE2m=0    ! DIAG_DOC: $\left<\sigma_\mathrm{E}\Ev^2\right>$
+  integer :: idiag_sigBBEm=0    ! DIAG_DOC: $\left<\sigma_\mathrm{E}\Bv\cdot\Ev\right>$
+  integer :: idiag_BdEdtm=0     ! DIAG_DOC: $\left<\Bv\cdot\partial\Ev/\partial t\right>$
+  integer :: idiag_adphiBm=0    ! DIAG_DOC: $\left<(\alpha/f)<\phi'\Bv\cdot\Ev\right>$
+  integer :: idiag_adphiB2m=0   ! DIAG_DOC: $\left<(\alpha/f)<\phi'\Bv^2/\sigma_E+\nabla\phi'\times\Ev\right>$
+  integer :: idiag_adphiB21m=0  ! DIAG_DOC: $\left<(\alpha/f)<\phi'\Bv^2/\sigma_E\right>$
+  integer :: idiag_adphiJBm=0   ! DIAG_DOC: $\left<(\alpha/f)<\phi'\Jv\cdot\Bv/\sigma_E\right>$
+  integer :: idiag_adphiBrms=0  ! DIAG_DOC: $\left<[(\alpha/f)<\phi'\Bv]\right>^{1/2}$
+  integer :: idiag_Johmrms=0    ! DIAG_DOC: $\left<\Jv^2\right>^{1/2}$
+  integer :: idiag_J2sigEm=0    ! DIAG_DOC: $\left<\Jv^2/\sigma_E\right>$
+  integer :: idiag_ujxb1m=0     ! DIAG_DOC: $\left<\uv\cdot(\Jv\times\Bv)_E\right>$
+  integer :: idiag_curlBrms=0   ! DIAG_DOC: $\left<(\mathrm{curl}\Bv)^2\right>^{1/2}$
+  integer :: idiag_echarge=0    ! DIAG_DOC: $\left<e_\mathrm{eff}\right>$
+  integer :: idiag_ebm=0        ! DIAG_DOC: $\left<\Ev\cdot\Bv\right>$
+!
+! xy averaged diagnostics given in xyaver.in
+!
+  integer :: idiag_exmz=0       ! XYAVG_DOC: $\left<{\cal E}_x\right>_{xy}$
+  integer :: idiag_eymz=0       ! XYAVG_DOC: $\left<{\cal E}_y\right>_{xy}$
+  integer :: idiag_ezmz=0       ! XYAVG_DOC: $\left<{\cal E}_z\right>_{xy}$
+  integer :: idiag_e2mz=0       ! XYAVG_DOC: $\left<\bm{E}^2\right>_{xy}$
+!
+! yz averaged diagnostics given in yzaver.in
+!
+  integer :: idiag_e2mx = 0     ! YZAVG_DOC: $\langle E^2\rangle_{yz}$
+  logical, pointer :: lext_force
+!
+  real, dimension (nx,3) :: dEdt
+  !$omp threadprivate(dEdt)
+  integer :: enum_replace_schwinger_by_arnold = 0
+  contains
+!
+!***********************************************************************
+    subroutine register_special
+!
+!  Configure pre-initialised (i.e. before parameter read) variables
+!  which should be know to be able to evaluate
+!
+!  18-mar-21/axel: coded Faraday displacement current
+!
+      use FArrayManager
+      use Sub, only: register_report_aux
+      use SharedVariables, only: put_shared_variable
+!
+!  This switch is used to indicate in magnetic.f90 that the displacement
+!  current module is used.
+!
+      ldisp_current =.true.
+!
+!  It would have been more consistent to call the indices to the
+!  three components iex, iey, and iez
+!
+      call farray_register_pde('ee',iee,vector=3)
+      iex=iee; iey=iee+1; iez=iee+2
+!
+      if (leedot_as_aux) &
+        call register_report_aux('eedot', ieedot, iedotx, iedoty, iedotz)
+!
+      if (ldivE_as_aux) &
+        call register_report_aux('divE', idivE)
+!
+      if (lsigE_as_aux) &
+        call register_report_aux('sigE', isigE)
+!
+      if (lsigB_as_aux) &
+        call register_report_aux('sigB', isigB)
+!
+      if (lsolve_chargedensity) &
+        call farray_register_pde('rhoe',irhoe)
+!
+      if (llorenz_gauge_disp) then
+        call farray_register_pde('a0',ia0)
+        call farray_register_pde('diva_name',idiva_name)
+      endif
+!
+!  For llongitudinalE=T, we replace graddiv in curlb by the gradient of Gamma.
+!  According to later work, this does not seem advantageous, however.
+!
+      if (llongitudinalE) call farray_register_pde('Gamma',iGamma)
+!
+!  Vector potential A_e of Pi = E + alphaf*phi*B = curl A_e.
+!
+      if (lpi_vecpot) call farray_register_pde('iaae',iaae,vector=3)
+!
+!  The following variables are also used in special/backreact_infl.f90
+!
+      call put_shared_variable('alpf',alpf,caller='register_disp_current')
+      call put_shared_variable('alpfpsi',alpfpsi)
+      call put_shared_variable('lphi_hom',lphi_hom)
+      call put_shared_variable('lpsi_hom',lpsi_hom)
+      call put_shared_variable('sigE_ceiling',sigE_ceiling)
+      call put_shared_variable('sigE_const_value',sigE_const_value)
+      call put_shared_variable('lphi_linear_regime',lphi_linear_regime)
+      call put_shared_variable('sigE_prefactor',sigE_prefactor)
+      call put_shared_variable('sigB_prefactor',sigB_prefactor)
+      call put_shared_variable('lcollinear_EB',lcollinear_EB)
+      call put_shared_variable('lcollinear_EB_aver',lcollinear_EB_aver)
+      call put_shared_variable('lnoncollinear_EB',lnoncollinear_EB)
+      call put_shared_variable('lnoncollinear_EB_aver',lnoncollinear_EB_aver)
+      call put_shared_variable('lmass_suppression',lmass_suppression)
+      call put_shared_variable('lallow_bprime_zero',lallow_bprime_zero)
+      call put_shared_variable('ladvance_ee',ladvance_ee)
+      call put_shared_variable('mass_chi',mass_chi)
+      call put_shared_variable('llongitudinalE',llongitudinalE)
+      call put_shared_variable('coupl_gy',coupl_gy)
+!
+      call svn_id( &
+           "$Id$")
+!
+    endsubroutine register_special
+!***********************************************************************
+    subroutine initialize_special(f)
+!
+!  called by run.f90 after reading parameters, but before the time loop
+!
+!  20-mar-21/axel: coded
+!
+      use FArrayManager
+      use SharedVariables, only: get_shared_variable
+      use Initcond, only: gaunoise
+!
+      real, contiguous, dimension(:,:,:,:) :: f
+      integer :: j
+!
+!  Initialize module variables which are parameter dependent
+!  If one really wants to work with c_light /= 1,
+!  then one needs to override this (loverride_c_light=T).
+!
+      if (c_light/=1. .and. .not. loverride_c_light) call fatal_error('disp_current', &
+          "use unit_system='set' or put loverride_c_light=T")
+      c_light2=c_light**2
+!
+      iphi_f=farray_index_by_name('infl_phi')
+      if (iphi_f<=0) iphi_f=farray_index_by_name('phi')
+      call get_shared_variable('lbb_as_comaux',lbb_as_comaux,default_val=.false.)
+      if (lpi_vecpot) then
+        if (iphi_f<=0) call fatal_error('initialize_special','lpi_vecpot needs an axion field')
+      endif
+!
+      if (lhydro) then
+        call get_shared_variable("lext_force",lext_force,caller='initialize_special')
+      else
+       allocate(lext_force)
+       lext_force=.false.
+      endif
+!
+      if (lmagnetic .and. (.not.lswitch_off_divJ .or. lext_force)) then
+        call get_shared_variable('eta',eta,caller='initialize_special')
+      else
+       allocate(eta)
+       eta=impossible
+      endif
+!
+!  lsolve_J0 uses the uniform conductivity sigma=1/(mu0*eta) of the magnetic
+!  module, which is also the one used there for jj_ohm.
+!  Checked only in run.x, since lext_force and eta are run parameters.
+!
+      if (lsolve_J0 .and. lrun) then
+        if (.not.lsolve_chargedensity) call fatal_error('initialize_special', &
+            'lsolve_J0 needs lsolve_chargedensity=T in start.in')
+        if (.not.(lhydro .and. lmagnetic)) call fatal_error('initialize_special', &
+            'lsolve_J0 needs hydro and magnetic')
+        if (lswitch_off_divJ) call fatal_error('initialize_special', &
+            'lsolve_J0 is incompatible with lswitch_off_divJ')
+        if (eta==0. .or. eta==impossible) call fatal_error('initialize_special', &
+            'lsolve_J0 needs eta/=0 in magnetic_run_pars')
+        if (.not.lext_force) call fatal_error('initialize_special', &
+            'lsolve_J0 needs lext_force=T in hydro_run_pars (Lorentz four-force)')
+        if (all(J0_model/=(/'relativistic','gamma1      ','galilean    '/))) &
+          call fatal_error('initialize_special','no such J0_model: '//trim(J0_model))
+        if (lJ0_no_disp .and. lJ0_divE_in_divJ) call fatal_error('initialize_special', &
+            'lJ0_divE_in_divJ has no effect with lJ0_no_disp')
+      endif
+!
+!  The following are only obtained when luse_scale_factor_in_sigma=T
+!  (luse_scale_factor_in_sigma=F by default, because they are defined
+!  in special/backreact_infl.f90, which may not be always be used).
+!
+      if (luse_scale_factor_in_sigma) then
+        call get_shared_variable('Hscript', Hscript ,caller='initialize_special')
+        call get_shared_variable('echarge', echarge)
+        call get_shared_variable('lsigE_const', lsigE_const,default_val=.false.)
+        call get_shared_variable('sigEm_all', sigEm_all)
+        call get_shared_variable('sigBm_all', sigBm_all)
+        call get_shared_variable('lohm_evolve', lohm_evolve)
+        call get_shared_variable('e2m_all', e2m_all)
+        call get_shared_variable('j2m_all', j2m_all)
+        if (lreplace_Schwinger_by_Arnold .and. &
+          replace_Schwinger_by_Arnold=='replace_at_end_of_reheating') &
+          call get_shared_variable('lsolve_for_phi', lsolve_for_phi)
+      else
+        if (.not.associated(Hscript)) allocate(Hscript,echarge,sigEm_all,sigBm_all)
+        Hscript=0.
+        echarge=0.
+        sigEm_all=0.
+        sigBm_all=0.
+        allocate(lohm_evolve,lsigE_const)
+        lohm_evolve=.false.
+        lsigE_const=.false.
+      endif
+!
+!  Check validity of lna1_switch_toArnold and lna2_switch_toArnold
+!
+      if (lreplace_Schwinger_by_Arnold .and. &
+          replace_Schwinger_by_Arnold=='interpol_from_lna1_to_lna2') then
+        if (lna1_switch_toArnold==impossible .or. &
+            lna2_switch_toArnold==impossible) then
+              call fatal_error('initialize_special', &
+                  'both lna1_switch_toArnold and lna2_switch_toArnold must be given')
+        endif
+      endif
+!
+!  Reinitialize magnetic field using a small selection of perturbations
+!  that were mostly also available as initial conditions.
+!
+      if (reinitialize_ee) then
+        do j=1,ninit
+          select case (initee(j))
+          case ('rescale')
+            f(:,:,:,iex:iez)=rescale_ee*f(:,:,:,iex:iez)
+            if (llongitudinalE) f(:,:,:,iGamma)=rescale_ee*f(:,:,:,iGamma)
+          case ('gaussian-noise'); call gaunoise(amplee(j),f,iex,iez)
+          case default
+            call fatal_error('initialize_special','no such init_ee: "'//trim(initee(j))//'"')
+          endselect
+        enddo
+      endif
+
+      if (lklein_gordon) then
+        call get_shared_variable('lphi_doublet',lphi_doublet, caller='initialize_disp_current')
+        call get_shared_variable('lphi_hypercharge',lphi_hypercharge)
+        call get_shared_variable('lwaterfall',lwaterfall)
+      else
+        if (.not.associated(lphi_doublet)) allocate(lphi_doublet,lphi_hypercharge,lwaterfall)
+        lphi_doublet=.false.
+        lphi_hypercharge=.false.
+        lwaterfall=.false.
+      endif
+!
+      if (lphi_hom) weight_longitudinalE=0.
+!
+!  To know whether we are solving the relativistic eos equations we need to get lrelativistic_eos from density.
+!
+      if (ldensity) then
+        call get_shared_variable('lrelativistic_eos',lrelativistic_eos, caller='initialize_backreact_infl')
+      else
+        allocate(lrelativistic_eos)
+        lrelativistic_eos=.false.
+      endif
+!
+      call keep_compiler_quiet(f)
+    endsubroutine initialize_special
+!***********************************************************************
+    subroutine init_special(f)
+!
+!  initialise special condition; called from start.f90
+!  06-oct-2003/tony: coded
+!
+      use Initcond
+      use Mpicomm
+      use Sub
+!
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, dimension (nx) :: divA, divE
+      real, dimension (nx,3) :: jjv, bbv, uuv, uxbv
+      real, dimension (nx) :: u2v
+      integer :: i, j
+!
+!
+!  SAMPLE IMPLEMENTATION
+!
+      do j=1,ninit
+        select case (initee(j))
+          case ('nothing'); if (lroot) print*,'initee: nothing'
+          case ('zero'); f(:,:,:,iex:iez)=0.
+          case ('ohmic')
+!
+!  E from Ohm's law with J = curl B (no displacement current, charge-flow term dropped):
+!  E = J/(gamma*sigma) - uxB with sigma = 1/eta_init_ohmic (set it to the run's eta).
+!  Avoids the initial transient of a non-Ohmic E (e.g. E=0), whose current
+!  gamma*sigma*uxB gives the fluid a sigma-independent kick.
+!  Needs u and A to be initialized already (init_uu and init_aa come before init_special).
+!
+            if (eta_init_ohmic<=0.) call fatal_error('init_special','initee=ohmic needs eta_init_ohmic>0')
+            call update_ghosts_ptr(f,iax,iaz)
+            do n=n1,n2; do m=m1,m2
+              call del2v_etc(f,iaa,curlcurl=jjv)
+              call curl(f,iaa,bbv)
+              uuv=f(l1:l2,m,n,iux:iuz)
+              call dot2_mn(uuv,u2v)
+              call cross_mn(uuv,bbv,uxbv)
+              do i=1,3
+                f(l1:l2,m,n,iex+i-1)=eta_init_ohmic*sqrt(1.-u2v)*jjv(:,i)/mu0-uxbv(:,i)
+              enddo
+            enddo; enddo
+          case ('coswave-phase')
+            call coswave_phase(f,iex,ampl_ex,kx_ex,ky_ex,kz_ex,phase_ex)
+            call coswave_phase(f,iey,ampl_ey,kx_ey,ky_ey,kz_ey,phase_ey)
+            call coswave_phase(f,iez,ampl_ez,kx_ez,ky_ez,kz_ez,phase_ez)
+          case ('sinwave-phase')
+            call sinwave_phase(f,iex,ampl_ex,kx_ex,ky_ex,kz_ex,phase_ex)
+            call sinwave_phase(f,iey,ampl_ey,kx_ey,ky_ey,kz_ey,phase_ey)
+            call sinwave_phase(f,iez,ampl_ez,kx_ez,ky_ez,kz_ez,phase_ez)
+          case ('power_randomphase_hel')
+            call power_randomphase_hel(amplee(j),initpower_ee,initpower2_ee, &
+              cutoff_ee,ncutoff_ee,kpeak_ee,f,iex,iez,relhel_ee,kgaussian_ee, &
+              lskip_projection_ee, lvectorpotential, lscale_tobox=lscale_tobox, &
+              lpower_profile_file=lpower_profile_file, power_filename=power_filename, &
+              lno_noise=lno_noise_ee, lrandom_ampl=lrandom_ampl_ee, &
+              lfixed_phase=lfixed_phase_ee)
+          case default
+            call fatal_error('init_ee','no such init_ee: "'//trim(initee(j))//'"')
+        endselect
+      enddo
+!
+!  Initial condition for Gamma = divA
+!  With lsolve_J0, fill the ghost zones of A first (as for E below).
+!  Boundcond cannot be used here (it uses Special), so update_ghosts is called
+!  through the pointer set in initialize_boundcond (called before init_special).
+!
+      if (llongitudinalE) then
+        if (lsolve_J0) call update_ghosts_ptr(f,iax,iaz)
+        do n=n1,n2; do m=m1,m2
+          call div(f,iaa,diva)
+          f(l1:l2,m,n,iGamma)=diva
+        enddo; enddo
+      endif
+!
+!  Initial condition for rhoe = divE (J^0 = divE with lsolve_J0).
+!  With lsolve_J0, fill the ghost zones of E first, so that divE is also
+!  correct near the boundaries and the initial Gauss residual vanishes.
+!
+      if (lsolve_chargedensity) then
+        if (lsolve_J0) call update_ghosts_ptr(f,iex,iez)
+        do n=n1,n2; do m=m1,m2
+          call div(f,iee,divE)
+          f(l1:l2,m,n,irhoe)=divE
+!
+!  Optional initial Gauss violation (lsolve_J0 experiments).
+!
+          if (lsolve_J0 .and. ampl_J0pert/=0.) &
+            f(l1:l2,m,n,irhoe)=f(l1:l2,m,n,irhoe)+ampl_J0pert*sin(k_J0pert*y(m))
+        enddo; enddo
+      endif
+!
+!  Initialize diva_name if llorenz_gauge_disp=T
+!
+      if (llorenz_gauge_disp) then
+        do n=n1,n2; do m=m1,m2
+          call div(f,iaa,diva)
+          f(l1:l2,m,n,idiva_name)=diva
+        enddo; enddo
+!
+!  initial conditions for A0 (provided llorenz_gauge_disp=T)
+!
+        select case (inita0)
+          case ('coswave-phase')
+            call coswave_phase(f,ia0,ampl_a0,kx_a0,ky_a0,kz_a0,phase_a0)
+          case ('zero'); f(:,:,:,ia0)=0.
+          case ('power_randomphase')
+            call power_randomphase_hel(ampla0,initpower_a0,initpower2_a0, &
+              cutoff_a0,ncutoff_a0,kpeak_a0,f,ia0,ia0, &
+              relhel_a0,kgaussian_a0, lskip_projection_a0, lvectorpotential, &
+              lscale_tobox, lpower_profile_file=.false.)
+          case default
+            call fatal_error("init_special","no such inita0: "//trim(inita0))
+        endselect
+      endif
+!
+      if (leedot_as_aux) f(:,:,:,iedotx:iedotz)=0.
+      if (ldivE_as_aux) f(:,:,:,idivE)=0.
+      if (lsigE_as_aux) f(:,:,:,isigE)=0.
+      if (lsigB_as_aux) f(:,:,:,isigB)=0.
+!
+      if (lpi_vecpot) call init_aae(f)
+!
+    endsubroutine init_special
+!***********************************************************************
+    subroutine pencil_criteria_special()
+!
+!  All pencils that this special module depends on are specified here.
+!
+!  25-feb-07/axel: adapted
+!
+!  compulsory pencils
+!
+      lpenc_requested(i_aa)=.true.
+      lpenc_requested(i_el)=.true.
+      ! alberto: should be this pencil only requested if llorenz_gauge_disp=T?
+      !lpenc_requested(i_ga0)=.true.
+      lpenc_requested(i_curlb)=.true.
+      lpenc_requested(i_jj_ohm)=.true.
+!
+!  The gGamma pencil should only be requested when llongitudinalE is true.
+!
+      if (llongitudinalE) lpenc_requested(i_gGamma)=.true.
+!
+!  Pencils for axion-like coupling alpf * phi F Fdual
+!
+      if (alpf/=0.) then
+        lpenc_requested(i_bb)=.true.
+        lpenc_requested(i_phi)=.true.
+        lpenc_requested(i_dphi)=.true.
+        lpenc_requested(i_gphi)=.true.
+      endif
+      if (alpfpsi/=0. .and. lwaterfall) then
+        lpenc_requested(i_bb)=.true.
+        lpenc_requested(i_dpsi)=.true.
+        lpenc_requested(i_gpsi)=.true.
+      endif
+!
+      if (llorenz_gauge_disp) lpenc_requested(i_ga0)=.true.
+!
+! Pencils for lnoncollinear_EB and lcollinear_EB cases.
+!
+      if (lnoncollinear_EB .or. lnoncollinear_EB_aver &
+        .or. lcollinear_EB .or. lcollinear_EB_aver) then
+        lpenc_requested(i_bb)=.true.
+        lpenc_requested(i_b2)=.true.
+        lpenc_requested(i_e2)=.true.
+      endif
+!
+   !  if (lnoncollinear_EB) then
+   !    lpenc_requested(i_eb)=.true.
+   !  endif
+      lpenc_requested(i_eb)=.true.
+!
+      if (ldensity .and. ldensity_add_je_heating) then
+        lpenc_requested(i_jj)=.true.
+        lpenc_requested(i_el)=.true.
+        lpenc_requested(i_rho1)=.true.
+      endif
+!
+!  Need graddiva for resitive gauge when displacement current is solved for:
+!
+      if (lresistive_gauge_disp) then
+        lpenc_requested(i_graddiva)=.true.
+      endif
+!
+!  Terms for Gamma evolution.
+!
+      if (llongitudinalE) then
+        lpenc_requested(i_divE)=.true.
+        ! lpenc_requested(i_gGamma)=.true.
+        ! alberto: gGamma is always requested, as curlb depends on it
+      endif
+!
+      if (idiag_constrainteqn/=0 .or. idiag_constrainteqnrms/=0 .or. idiag_gausscrms/=0 &
+          .or. idiag_gaussprms/=0 .or. idiag_gaussnrms/=0) then
+        lpenc_diagnos(i_divE)=.true.
+        lpenc_diagnos(i_gphi)=.true.
+        lpenc_diagnos(i_bb)=.true.
+      endif
+      if (idiag_divEm/=0. .or. idiag_divErms/=0.) then
+        lpenc_requested(i_divE)=.true.
+      endif
+!
+!  charge density
+!
+      if (lsolve_chargedensity) then
+        lpenc_requested(i_divJ)=.true.
+        lpenc_requested(i_uij)=.true.
+        lpenc_requested(i_bij)=.true.
+        lpenc_requested(i_uu)=.true.
+        lpenc_requested(i_bb)=.true.
+        if (lsolve_J0) then
+          lpenc_requested(i_J0)=.true.
+          lpenc_requested(i_divu)=.true.
+          lpenc_requested(i_jj)=.true.
+          lpenc_requested(i_uxb)=.true.
+!  lorentz_gamma is only computed (in hydro) when lorentz is requested.
+          lpenc_requested(i_lorentz)=.true.
+          lpenc_requested(i_lorentz_gamma)=.true.
+          lpenc_requested(i_ext_force)=.true.
+          if (lJ0_divE_in_divJ) lpenc_requested(i_divE)=.true.
+          if (lJ0_no_disp) lpenc_requested(i_curlb)=.true.
+        endif
+      endif
+      if (idiag_J0rms/=0) lpenc_diagnos(i_J0)=.true.
+      if (idiag_gaussJ0rms/=0 .or. idiag_gaussJ0max/=0 .or. idiag_gaussdamprms/=0) then
+        lpenc_diagnos(i_J0)=.true.
+        lpenc_diagnos(i_divE)=.true.
+      endif
+      if (lsolve_J0) then
+        lpenc_diagnos(i_u2)=.true.
+        lpenc_diagnos(i_e2)=.true.
+      endif
+      if (idiag_divJrms/=0) lpenc_diagnos(i_divJ)=.true.
+!
+!  diffusion term.
+!
+      if (eta_ee/=0.) lpenc_requested(i_del2ee)=.true.
+!
+!  Higgs pencils
+!
+      if (lklein_gordon .and. lphi_doublet .and. lphi_hypercharge) then
+        lpenc_requested(i_phi)=.true.
+        lpenc_requested(i_phi_doublet)=.true.
+        lpenc_requested(i_cov_der)=.true.
+        lpenc_requested(i_jj_higgsY)=.true.
+      endif
+!
+!  Diagnostics pencils:
+!
+      ! if (eta_ee/=0.) lpenc_requested(i_del2ee)=.true.
+      ! if (eta_ee/=0.) lpenc_requested(i_del2ee)=.true.
+
+      if (idiag_BcurlEm/=0) lpenc_diagnos(i_curlE)=.true.
+!
+      if (idiag_BcurlBm/=0) then
+        lpenc_diagnos(i_bb)=.true.
+        lpenc_diagnos(i_curlb)=.true.
+      endif
+!
+      if (idiag_ebm/=0) lpenc_diagnos(i_eb)=.true.
+      if (idiag_a0rms/=0) lpenc_diagnos(i_a0)=.true.
+      if (idiag_grms/=0) lpenc_diagnos(i_diva)=.true.
+      if (idiag_edotrms/=0) lpenc_diagnos(i_edot2)=.true.
+      if (idiag_EEEM/=0 .or. idiag_erms/=0 .or. idiag_emax/=0 & 
+        .or. idiag_e2mx/=0 .or. idiag_e2mz/=0 ) lpenc_diagnos(i_e2)=.true.
+      ! if (idiag_exmz/=0 .or. idiag_eymz/=0 .or. idiag_ezmz/=0 ) lpenc_diagnos(i_el)=.true.
+      ! if (idiag_exm/=0 .or. idiag_eym/=0 .or. idiag_ezm/=0 ) lpenc_diagnos(i_el)=.true.
+!
+    endsubroutine pencil_criteria_special
+!***********************************************************************
+    subroutine pencil_interdep_special(lpencil_in)
+!
+!  Interdependency among pencils provided by this module are specified here.
+!
+!  18-07-06/tony: coded
+!
+      logical, dimension(npencils) :: lpencil_in
+!
+      call keep_compiler_quiet(lpencil_in)
+!
+    endsubroutine pencil_interdep_special
+!***********************************************************************
+    subroutine calc_pencils_special(f,p)
+!
+!  Most basic pencils should come first, as others may depend on them.
+!
+!   24-nov-04/tony: coded
+!
+      use Sub, only: grad, div, curl, del2v, dot2_mn, dot, levi_civita, & 
+                     del2v_etc, cross_mn, multsv_mn, multsv_add, dot_mn, &
+                     multsv_mn_add, gij
+!
+      real, contiguous, dimension(:,:,:,:) :: f
+      type(pencil_case) :: p
+      real :: conductivity, sigma_J0
+      real, dimension (nx,3,3) :: Eij
+      real, dimension (nx,3) :: gJ0, guE, ggam, Wv
+      real, dimension (nx) :: tmp2, tmp3, tmp4, uE, divW, gam
+      real :: H_arnold, T_arnold, sigE_arnold, weight_arnold, lna
+      real, parameter :: C_arnold=12., e_arnold=0.303, g_e_arnold=106.75
+!
+      real, dimension (nx,3) :: tmpv, E_MHD
+      real, dimension (nx) :: tmp, mass_suppression_fact, gphi2, prefactor
+      real, dimension (nx) :: uExB
+      integer :: i,j,k
+!
+!
+!  Pencil for charge density.
+!
+      if (lsolve_chargedensity) then
+        p%rhoe=f(l1:l2,m,n,irhoe)
+      else
+        p%rhoe = 0.0
+      endif
+!
+!  With lsolve_J0, f(irhoe) is J^0; the actual rho_e is computed further
+!  below, once el is known.
+!
+      p%J0=p%rhoe
+!
+!  Terms for Gamma evolution.
+!
+      if (lpi_vecpot) then
+        call curl(f,iaae,tmpv)
+        do i=1,3
+          p%el(:,i)=tmpv(:,i)-alpf*f(l1:l2,m,n,iphi_f)*p%bb(:,i)
+        enddo
+      endif
+      if (lpenc_requested(i_divE)) then
+        if (lpi_vecpot) then
+!  div E = div(curl C) - alpf*div(phi B), and div(curl C) = 0 identically for the
+!  commuting der stencils. div(phi B) needs B at neighbouring points
+!  (lbb_as_comaux=T); otherwise the product-rule form alpf*gphi.B is used, which
+!  differs by the discrete Leibniz error.
+          if (lbb_as_comaux) then
+            call div_phib(f,tmp)
+          else
+            call dot(p%gphi,p%bb,tmp)
+          endif
+          p%divE=-alpf*tmp
+        else
+          call div(f,iee,p%divE)
+        endif
+      endif
+      if (lpenc_requested(i_gGamma)) then
+        if (llongitudinalE) then
+          call grad(f,iGamma,p%gGamma)
+          ! alberto: when llongitudinalE=F, we should compute
+          ! grad div a from f-array
+        else
+          !call del2v_etc(f,iaa,GRADDIV=p%gGamma)
+          !16-sep-25/axel: but in this case, p%gGamma should not be needed.
+          call fatal_error("calc_pencils_special","Gamma is not defined")
+        endif
+      endif
+!
+!  Replace p%curlb by the combination -p%del2a+p%gGamma.
+!
+      ! alberto: as curlb is always requested, this allows to
+      ! compute curlb also if llongitudinalE=F
+      !16-sep-25/axel: but curlb was already computed in calc_pencils_magnetic_pencpar (in magnetic).
+      if (lpenc_requested(i_curlb)) then
+        if (lapply_Gamma_corr) then
+          if (llongitudinalE) then
+            p%curlb=-p%del2a+p%gGamma
+          else
+            call fatal_error("calc_pencils_special","Gamma is not defined")
+          endif
+        endif
+      endif
+      ! if (llongitudinalE) then
+      !   ! call div(f,iee,p%divE)
+      !   ! call grad(f,iGamma,p%gGamma)
+      !   if (lapply_Gamma_corr) p%curlb=-p%del2a+p%gGamma
+      !   ! if (lsolve_chargedensity) p%rhoe=f(l1:l2,m,n,irhoe)
+      ! endif
+!
+! el and e2 (note that this is called after magnetic, where sigma is computed)
+!
+      if (.not.lpi_vecpot) p%el=f(l1:l2,m,n,iex:iez)
+      call dot2_mn(p%el,p%e2)
+!
+!  eb pencil
+!
+      if (lpenc_requested(i_eb)) call dot(p%el,p%bb,p%eb)
+!
+!  Compute fully non-collinear expression for the current density.
+!  This is for the *spatially dependent* sigE and sigB.
+!  The averaged ones are computed in backreact_infl.f90.
+!  Any change to the code must be the same both here and there.
+!  Location 1 for conductivity.
+!
+      if (lnoncollinear_EB .or. lnoncollinear_EB_aver .or. lcollinear_EB .or. lcollinear_EB_aver) then
+        if (lnoncollinear_EB) then
+          p%boost=sqrt((p%e2-p%b2)**2+4.*p%eb**2)
+          p%gam_EB=sqrt21*sqrt(1.+(p%e2+p%b2)/p%boost)
+          p%eprime=sqrt21*sqrt(p%e2-p%b2+p%boost)
+          p%bprime=sqrt21*sqrt(p%b2-p%e2+p%boost)*sign(1.,p%eb)
+          if (lallow_bprime_zero) then
+            where (p%eprime/=0.)
+              where (p%bprime/=0.)
+                p%jprime=Chypercharge*echarge**3/(6.*pi**2*Hscript)*p%eprime*abs(p%bprime)/tanh(pi*abs(p%bprime)/p%eprime)
+              elsewhere
+                p%jprime=Chypercharge*echarge**3/(6.*pi**3*Hscript)*p%eprime**2
+              endwhere
+              p%sigE=sigE_prefactor*abs(p%jprime)*p%eprime/(p%gam_EB*p%boost)
+              p%sigB=sigB_prefactor*abs(p%jprime)*p%eb/(p%eprime*p%gam_EB*p%boost)
+              p%count_eb0=0.
+            elsewhere
+              p%jprime=0.
+              p%sigE=0.
+              p%sigB=0.
+              p%count_eb0=1.
+            endwhere
+          else
+            where (p%eprime/=0. .and. p%bprime/=0.)
+              p%jprime=Chypercharge*echarge**3/(6.*pi**2*Hscript)*p%eprime*abs(p%bprime)/tanh(pi*abs(p%bprime)/p%eprime)
+              p%sigE=sigE_prefactor*abs(p%jprime)*p%eprime/(p%gam_EB*p%boost)
+              p%sigB=sigB_prefactor*abs(p%jprime)*p%eb/(p%eprime*p%gam_EB*p%boost)
+              p%count_eb0=0.
+            elsewhere
+              p%jprime=0.
+              p%sigE=0.
+              p%sigB=0.
+              p%count_eb0=1.
+            endwhere
+          endif
+
+        elseif (lcollinear_EB) then
+          p%eprime=sqrt(p%e2)
+          p%bprime=sqrt(p%b2)
+          where (p%eprime/=0. .and. p%bprime/=0.)
+            p%sigE=sigE_prefactor*Chypercharge*echarge**3/(6.*pi**2*Hscript)*p%bprime/tanh(pi*abs(p%bprime)/p%eprime)
+            p%count_eb0=0.
+          elsewhere
+            p%sigE=0.
+            p%count_eb0=1.
+          endwhere
+          if (lmass_suppression) then
+            mass_suppression_fact=exp(-pi*mass_chi**2/(Chypercharge**onethird*echarge*sqrt(p%e2)))
+            p%sigE=p%sigE*mass_suppression_fact
+          endif
+          p%sigB=0.
+        elseif (lnoncollinear_EB_aver .or. lcollinear_EB_aver) then
+!
+!  This is based on <E> and <B>. Later, when sigEm and sigBm diagonstics are being
+!  computed, those are then based on the same p%sigE and p%sigB values, and therefore
+!  also the same as sigEma and sigBma.
+!
+          p%sigE=sigEm_all
+          p%sigB=sigBm_all
+        endif
+!
+!  Impose a ceiling unless sigE_ceiling is impossible.
+!
+        if (sigE_ceiling/=impossible) p%sigE=min(p%sigE,sigE_ceiling)
+!
+!  Put p%sigE=sigE_const_value when lsigE_const=T (this is not normally used).
+!
+        if (lsigE_const) then
+          if (sigE_const_value==impossible) &
+            call fatal_error('calc_pencils_special','sigE_const_value must not be impossible')
+          p%sigE=sigE_const_value
+          p%sigB=0.
+        endif
+!
+!  Compute Arnold conductivity, comoving, so multiply by ascale;
+!  used either as diagnostics or to replace the Schwinger value with this.
+!
+        if (lreplace_Schwinger_by_Arnold .or. idiag_etaArn>0) then
+          H_arnold=Hscript/ascale
+          T_arnold=(3*H_arnold**2/((8.*pi)*(pi**2/30.)*g_e_arnold))**.25
+          sigE_arnold=ascale*C_arnold*T_arnold/(e_arnold**2*log(1./e_arnold))
+          etaArn=1./sigE_arnold
+        endif
+!
+!  Possibility to replace Schwinger expression by Arnold expression,
+!  either by switch at the end of reheating or in a given lna interval.
+!
+        if (lreplace_Schwinger_by_Arnold) then
+          select case (replace_Schwinger_by_Arnold)
+          case ('replace_at_end_of_reheating')
+            if (.not. lsolve_for_phi) p%sigE=sigE_arnold*sigE_Arnold_prefactor
+          case ('interpol_from_lna1_to_lna2')
+            lna=log(ascale)
+            weight_arnold=max(0.,min(1., &
+               (lna-lna1_switch_toArnold)/(lna2_switch_toArnold-lna1_switch_toArnold)))
+            p%sigE=p%sigE**(1.-weight_arnold)*(sigE_arnold*sigE_Arnold_prefactor)**weight_arnold
+          case default
+            call fatal_error('calc_pencils_special (disp_current)', &
+              'no such replace_Schwinger_by_Arnold: "'//trim(replace_Schwinger_by_Arnold)//'"')
+          endselect
+        endif
+!
+!  Compute magnetic diffusivity from 1/sigE, unless given.
+!  These 5 lines used to come after "if (ijx/=0)", but it should be done even if lohm_evolve=T
+!
+        if (eta_given==impossible) then
+          etaSchw=1./p%sigE
+        else
+          etaSchw=eta_given
+          p%sigE=1./eta_given
+        endif
+!
+!  Now compute current, using any of the 4 expressions above.
+!  This also sets the auxiliary array (l1:l2,m,n,ijx:ijz), if needed.
+!  With lcharge_flow, add rhoe*uu contribution to current.
+!
+        if (lohm_evolve) then
+          p%jj_ohm=f(l1:l2,m,n,ijx:ijz)
+        else
+          if (ladvance_ee) then
+            do j=1,3
+              if (lhydro) then
+                p%jj_ohm(:,j)=p%sigE*(p%el(:,j)+p%uxb(:,j))+p%sigB*p%bb(:,j)
+                if (lcharge_flow) then
+                  if (charge_flow_limiter==0.) then
+                    tmp=charge_flow_factor*p%divE
+                  else
+                    tmp=charge_flow_factor*p%divE/sqrt(1.+p%u2/charge_flow_limiter**2)
+                  endif
+                  call multsv_mn_add(tmp,p%uu,p%jj_ohm)
+                endif
+              else
+                p%jj_ohm(:,j)=p%sigE*p%el(:,j)+p%sigB*p%bb(:,j)
+              endif
+            enddo
+          else
+!
+!  0 = curlB - mu0*J, but ignore mu0 for now.
+!  Usually, lignore_adphiB_term_in_MHD_current=F, so -alpf*p%infl_dphi,p%bb is included.
+!  Note that the current density does not explicitly depend on sigE or sigB.
+!
+            if (lignore_adphiB_term_in_MHD_current) then
+              p%jj_ohm=p%curlb
+            else
+              call multsv_add(p%curlb,-alpf*p%infl_dphi,p%bb,p%jj_ohm)
+            endif
+          endif
+!
+!  This would overwrite f(l1:l2,m,n,ijx:ijz)
+!
+          if (ijx/=0) f(l1:l2,m,n,ijx:ijz) = p%jj_ohm
+!
+!  If no time advance of E, we add here the expression without dispacement
+!  current based on Ohm's law, i.e., E = -uxb + J/sigE.
+!  For numerical reasons, we may want to use lresistive_gauge_ee=T (not the default).
+!  In that case, terms such as Ax,xx, Ay,yy, and Az,zz are present.
+!  Also update the electric field pencil.
+!
+          if (.not. ladvance_ee) then
+            if (lnoncollinear_EB .or. lnoncollinear_EB_aver) then
+              call fatal_error('calc_pencils_special','MHD currently works only for the collinear case')
+            else
+              if (lresistive_gauge_ee) then
+                call multsv_mn(-etaSchw,p%del2a,tmpv)
+              else
+                call multsv_mn(etaSchw,p%jj_ohm,tmpv)
+              endif
+              E_MHD=-p%uxb+tmpv
+              if (linclude_dphiB_in_MHD) then
+                if (lcorrect_sign_adphiB_term) then
+                  call multsv_add(E_MHD,-alpf*etaSchw*p%infl_dphi,p%bb,E_MHD)
+                else
+                  call multsv_add(E_MHD,alpf*etaSchw*p%infl_dphi,p%bb,E_MHD)
+                endif
+                if (linclude_gphixE_in_MHD) then
+                  call dot2_mn(p%gphi,gphi2)
+                  prefactor=alpf*etaSchw
+                  tmp=1./(1.+prefactor*gphi2)
+!
+!  eps_123*EMHD(2)
+!  eps_132*EMHD(3)
+!
+                  f(l1:l2,m,n,iex)=tmp*( &
+                    (1.+prefactor*p%gphi(:,1)**2)*E_MHD(:,1) &
+                       +prefactor*p%gphi(:,3)    *E_MHD(:,2) &
+                       -prefactor*p%gphi(:,2)    *E_MHD(:,3))
+!
+!  eps_231*EMHD(3)
+!  eps_213*EMHD(1)
+!
+                  f(l1:l2,m,n,iey)=tmp*( &
+                       -prefactor*p%gphi(:,3)    *E_MHD(:,1) &
+                   +(1.+prefactor*p%gphi(:,2)**2)*E_MHD(:,2) &
+                       +prefactor*p%gphi(:,1)    *E_MHD(:,3))
+!
+!  eps_312*EMHD(1)
+!  eps_321*EMHD(2)
+!
+                  f(l1:l2,m,n,iez)=tmp*( &
+                       +prefactor*p%gphi(:,2)    *E_MHD(:,1) &
+                       -prefactor*p%gphi(:,1)    *E_MHD(:,2) &
+                   +(1.+prefactor*p%gphi(:,3)**2)*E_MHD(:,3))
+                else
+                  f(l1:l2,m,n,iex:iez)=E_MHD
+                endif
+              else
+                f(l1:l2,m,n,iex:iez)=E_MHD
+              endif
+              if (llate_reset_el_pencil) p%el=f(l1:l2,m,n,iex:iez)
+            endif
+          endif
+        endif
+!
+!  endif from "lnoncollinear_EB, lnoncollinear_EB_aver, lcollinear_EB, lcollinear_EB_aver"
+!
+      endif
+!
+!  The line "p%jj=p%jj_ohm", if outside llorentzforce_ee, breaks the samples/Schwinger sample.
+!
+      if (llorentzforce_ee) then
+        p%jj=p%jj_ohm
+        call cross_mn(p%jj,p%bb,p%jxb)
+        call multsv_mn(p%rho1,p%jxb,p%jxbr)
+      endif
+!
+!  lsolve_J0: covariant Ohm's law J^mu = rho_e U^mu + sigma E^mu, i.e.
+!  J^0 = gamma*(rho_e + sigma*u.E),  J = gamma*(rho_e*u + sigma*(E+uxB)),
+!  so rho_e = J^0/gamma - sigma*u.E and J = J^0*u + gamma*sigma*[E + uxB - (u.E)*u].
+!  This replaces the (non-relativistic) jj_ohm computed in magnetic; it is the
+!  current used in dE/dt and in the Lorentz four-force.
+!
+      if (lsolve_J0) then
+        sigma_J0=1./(mu0*eta)
+!
+!  Lorentz factor used in Ohm's law: gamma=1 for the gamma1 and galilean models.
+!
+        if (J0_model=='relativistic') then
+          gam=p%lorentz_gamma
+        else
+          gam=1.
+        endif
+        if (lJ0_no_disp) then
+!
+!  No displacement current: Ampere's law as a constraint, J = curl B.
+!  E, J^0 and rho_e are set further below (in the divJ block), where div(uxB) is known.
+!
+          p%jj_ohm=p%curlb/mu0
+        else
+          call dot(p%uu,p%el,uE)
+          if (J0_model=='galilean') then
+            p%rhoe=p%J0
+            Wv=p%el+p%uxb
+          else
+            p%rhoe=p%J0/gam-sigma_J0*uE
+            do j=1,3
+              Wv(:,j)=p%el(:,j)+p%uxb(:,j)-uE*p%uu(:,j)
+            enddo
+          endif
+          do j=1,3
+            p%jj_ohm(:,j)=p%J0*p%uu(:,j)+gam*sigma_J0*Wv(:,j)
+          enddo
+        endif
+        p%jj=p%jj_ohm
+!
+!  Keep the individual terms for the diagnostics.
+!
+        if (ldiagnos .and. .not.lJ0_no_disp) then
+          diag_uE=uE
+          diag_J0u2=p%J0**2*p%u2
+          call dot2_mn(Wv,tmp2)
+          diag_Jsig2=(gam*sigma_J0)**2*tmp2
+        endif
+      endif
+!
+! edot2
+! AB: leedot_as_aux is not used; is to be deleted
+!
+      if (leedot_as_aux) then
+        call dot2_mn(f(l1:l2,m,n,iedotx:iedotz),p%edot2)
+      else
+        p%edot2=0.
+      endif
+!
+!  del2ee  !(AB: not needed)
+!
+      if (eta_ee/=0.) call del2v(f,iex,p%del2ee)
+!
+!  curle
+!
+      if (lpencil(i_curlE)) call curl(f,iex,p%curlE)
+!
+!  curlb
+!
+!!! no implementation for p%curlb if lmagnetic=.false., also no for p%bb
+! !
+! !  del2ee
+! !
+!       if (eta_ee/=0.) call del2v(f,iex,p%del2ee)
+!
+! a0 & ga0
+!
+      if (ia0>0) then
+        p%a0=f(l1:l2,m,n,ia0)
+        call grad(f,ia0,p%ga0)
+      endif
+!
+!  divJ (using Ohm's law)
+!  divJ=sigma*[divE+eps_ijk*(u_j,i * b_k + u_j * b_k,i)]
+!  The use if eta may be suspect and should be checked.
+!
+      if (lpenc_requested(i_divJ)) then
+        tmp=0.
+        do i=1,3
+        do j=1,3
+        do k=1,3
+          tmp=tmp+levi_civita(i,j,k)*(p%uij(:,j,i)*p%bb(:,k)+p%uu(:,j)*p%bij(:,k,i))
+        enddo
+        enddo
+        enddo
+        if (lswitch_off_divJ) then
+          p%divJ=0.
+        elseif (lsolve_J0) then
+!
+!  d_i gamma = gamma^3 u_j d_i u_j (zero for the gamma1 and galilean models).
+!
+          if (J0_model=='relativistic') then
+            do i=1,3
+              ggam(:,i)=gam**3*sum(p%uu*p%uij(:,:,i),2)
+            enddo
+          else
+            ggam=0.
+          endif
+          if (lJ0_no_disp) then
+!
+!  No displacement current: E = J/(gamma*sigma) - uxB with J = curl B, and,
+!  since div J = 0, J^0 = div E = -div(uxB) - J.grad(gamma)/(gamma^2*sigma).
+!  rho_e from J^0 = rho_e/gamma + u.J (J^0 = rho_e for galilean).
+!  E and J^0 are written to f only for output: they are not evolved, and
+!  derivatives of E (divE, curlE diagnostics) are not meaningful in this mode.
+!
+            do j=1,3
+              p%el(:,j)=p%jj_ohm(:,j)/(gam*sigma_J0)-p%uxb(:,j)
+            enddo
+            call dot2_mn(p%el,p%e2)
+            call dot(p%jj_ohm,ggam,tmp4)
+            p%J0=-tmp-tmp4/(gam**2*sigma_J0)
+            call dot(p%uu,p%jj_ohm,tmp3)
+            if (J0_model=='galilean') then
+              p%rhoe=p%J0
+            else
+              p%rhoe=gam*(p%J0-tmp3)
+            endif
+            f(l1:l2,m,n,iex:iez)=p%el
+            f(l1:l2,m,n,irhoe)=p%J0
+            p%divJ=0.
+            if (ldiagnos) call dot(p%uu,p%el,diag_uE)
+          else
+!
+!  With J = J^0*u + sigma*gamma*W, W = E + uxB - (u.E)*u, and uniform sigma:
+!  divJ = u.grad(J^0) + J^0*div(u) + sigma*[gamma*div(W) + W.grad(gamma)],
+!  div(W) = div(E) + div(uxB) - u.grad(u.E) - (u.E)*div(u),
+!  d_i(u.E) = E_j d_i u_j + u_j d_i E_j.
+!  For galilean, W = E + uxB, so only div(E) + div(uxB) remain.
+!  div(E) is replaced by J^0 (Gauss), so that the Gauss residual
+!  div(E)-J^0 is damped at the rate gamma*sigma, unless lJ0_divE_in_divJ.
+!  tmp = div(uxB) from above; uE and Wv from the current block above.
+!
+            call grad(f,irhoe,gJ0)
+            call dot(p%uu,gJ0,tmp2)
+            if (lJ0_divE_in_divJ) then
+              divW=p%divE+tmp
+            else
+              divW=p%J0+tmp
+            endif
+            if (J0_model/='galilean') then
+              call gij(f,iex,Eij,1)
+              do i=1,3
+                guE(:,i)=sum(p%el*p%uij(:,:,i),2)+sum(p%uu*Eij(:,:,i),2)
+              enddo
+              call dot(p%uu,guE,tmp3)
+              divW=divW-tmp3-uE*p%divu
+            endif
+            call dot(Wv,ggam,tmp4)
+            p%divJ=tmp2+p%J0*p%divu+sigma_J0*(gam*divW+tmp4)
+            if (ldiagnos) then
+              diag_divJadv=tmp2+p%J0*p%divu
+              diag_divJohm=sigma_J0*gam*divW
+              diag_divJgam=sigma_J0*tmp4
+            endif
+          endif
+        else
+          if (eta==0.) then
+!
+!  The following expression ignores gradients of p%sigE
+!
+            !call fatal_error('disp_current/calc_pencils_special', "eta=0 not ok here")
+            p%divJ=(p%divE+tmp)*p%sigE
+          else
+            p%divJ=(p%divE+tmp)/(mu0*eta)
+          endif
+        endif
+      endif
+
+!  pencils for klein_gordon module
+      if (lpenc_requested(i_GammaY)) then
+        if (llongitudinalE) then
+          p%GammaY=f(l1:l2,m,n,iGamma)
+        else
+          call div(f,iaa,p%GammaY)
+        endif
+      endif
+      if (alpf/=0.and..not.lklein_gordon) p%dphi=p%infl_dphi
+      
+      if (lpenc_requested(i_ExB)) then
+        call cross_mn(p%el,p%ExB,p%ExB)
+      endif
+
+!
+!  lsolve_J0: Lorentz four-force (RoperPol+Midiri 2025, Eq. lorentz_comps),
+!  f^0 = E.J,  f = J^0*E + JxB, with the relativistic J from above.
+!  hydro/density then apply the relativistic prefactors.
+!
+      if (lext_force .and. lsolve_J0) then
+        call dot(p%el,p%jj_ohm,tmp)
+        p%ext_force(:,1)=p%ext_force(:,1)+tmp
+        call cross_mn(p%jj_ohm,p%bb,tmpv)
+        do i=1,3
+          p%ext_force(:,i+1)=p%ext_force(:,i+1)+p%J0*p%el(:,i)+tmpv(:,i)
+        enddo
+        if (ldiagnos) then
+          diag_f0=tmp
+          call dot2_mn(tmpv,diag_fJxB2)
+          diag_fJ0E2=p%J0**2*p%e2
+          diag_fLor2=0.
+          do i=1,3
+            diag_fLor2=diag_fLor2+(p%J0*p%el(:,i)+tmpv(:,i))**2
+          enddo
+        endif
+      elseif (lext_force) then
+        call dot_mn(p%uu,p%ExB,uExB)
+        conductivity = 1./eta
+        p%ext_force(:,1) = p%ext_force(:,1) -p%lorentz_gamma*(p%rhoe*p%udotE-conductivity*uExB-conductivity*p%e2)
+        do i=1,3
+          p%ext_force(:,i+1) = p%ext_force(:,i+1) -p%lorentz_gamma*((p%rhoe-conductivity*p%udotE)*p%el(:,i) &
+                              -p%rhoe*p%uxb(:,i) + conductivity*(p%ExB(:,i)-p%ub*p%bb(:,i) + p%b2*p%uu(:,i)))
+        enddo
+      endif
+!
+!  Total contribution to the timestep. Define here the array dtsrc_sigE
+!  which is used below for outputting the timestep constraint.
+!
+      if (lfirst.and.ldt.and.ldt_disp_current) then
+        if (ladvance_ee) then
+          dtsrc_sigE=p%sigE/cdt_sigE
+          dt1_max=max(dt1_max,dtsrc_sigE)
+        else
+          dtsrc_sigE=0.
+          diffus_etaSchw=etaSchw*dxyz_2
+          maxdiffus=max(maxdiffus,diffus_etaSchw)
+        endif
+!
+!  Detailed time step report.
+!
+        if (ldt_report) then
+          print*,'Time step report from disp_current: minval(1/dt1_max)=',minval(1./dt1_max)
+          print*,'Time step report from disp_current: minval(1/maxdiffus)=',minval(1./maxdiffus)
+          if (minval(diffus_etaSchw)>0.) &
+            print*,'Time step report from disp_current: minval(1/diffus_etaSchw)=',minval(1./diffus_etaSchw)
+        endif
+      endif
+!
+    endsubroutine calc_pencils_special
+!***********************************************************************
+    subroutine calc_constrainteqn(p,tmp,constrainteqn)
+
+      type(pencil_case) :: p
+      real, dimension(nx),intent(IN) :: tmp
+      real, dimension(nx), intent(OUT) :: constrainteqn
+
+      real, dimension(nx) :: constrainteqn1
+      !constrainteqn1=sqrt(p%divE**2+tmp**2)
+!
+!  in the following, should use "where"
+!
+      constrainteqn1=sqrt(p%divE**2+tmp**2)
+      if (any(constrainteqn1 == 0.)) then
+        constrainteqn=0.
+      else
+        constrainteqn=(p%divE-tmp)/constrainteqn1
+      endif
+
+    endsubroutine calc_constrainteqn
+!***********************************************************************
+    real function get_mfpf()
+
+      get_mfpf = beta_inflation*Hp_target
+
+    end function get_mfpf
+!***********************************************************************
+    real function get_fppf()
+
+      get_fppf=beta_inflation*((beta_inflation+1.)*Hp_target**2-appa_target)
+
+    end function get_fppf
+!***********************************************************************
+    subroutine calc_axion_term(p,dst,gphi,alpff,lphihom)
+!
+!  Compute -(alpha/f)*B.gradphi axion term (when alpha/f/=0).
+!
+      use Sub
+!
+      type(pencil_case) :: p
+      real, intent(in) :: alpff
+      logical, intent(in) :: lphihom
+      real, dimension(nx), intent(out) :: dst
+      real, dimension(nx,3), intent(in) :: gphi
+!
+!   14-sep-25/alberto: added axion coupling for a second scalar field psi
+!
+      if (lphihom) then
+        dst=0.
+      else
+        if (alpff/=0.) then
+        ! call dot(p%bb,p%gphi,dst2)
+          call dot(p%bb,gphi,dst)
+          dst=-alpff*dst
+        else
+          dst=0.
+        endif
+      endif
+
+      ! if (.not. lpsi_hom .and. alpfpsi/=0. .and. lwaterfall) then
+      !   call dot(p%bb,p%gpsi,dst2)
+      !   dst=dst-alpfpsi*dst2
+      ! endif
+
+    endsubroutine calc_axion_term
+!***********************************************************************
+    subroutine calc_helical_term(p,gtmp,dphi,gphi,lphihom)
+!
+!  Compute gtmp = phi'*B + gphi x E, or just phi'*B when lphihom=T (homogeneous case)
+!
+      use Sub
+
+      type(pencil_case), intent(IN) :: p
+      real, dimension(nx,3), intent(out) :: gtmp
+      logical, intent(in) :: lphihom
+      real, dimension(nx), intent(in) :: dphi
+      real, dimension(nx,3), intent(in) :: gphi
+!
+      if (lphihom) then
+        call multsv(dphi,p%bb,gtmp)
+      else
+        call cross(gphi,p%el,gtmp)
+        call multsv_add(gtmp,dphi,p%bb,gtmp)
+      endif
+
+      ! if (alpfpsi/=0. .and. lwaterfall) then
+      !   if (lpsi_hom) then
+      !     call multsv(p%dpsi,p%bb,gtmp2)
+      !   else
+      !     call cross(p%gpsi,p%el,gtmp2)
+      !     call multsv_add(gtmp2,p%dpsi,p%bb,gtmp2)
+      !   endif
+      !   gtmp=gtmp+gtmp2*alpfpsi
+      ! endif
+
+    endsubroutine
+!***********************************************************************
+    subroutine dspecial_dt(f,df,p)
+!
+!  calculate right hand side of ONE OR MORE extra coupled PDEs
+!  along the 'current' Pencil, i.e. f(l1:l2,m,n) where
+!  m,n are global variables looped over in equ.f90
+!
+!  Due to the multi-step Runge Kutta timestepping used one MUST always
+!  add to the present contents of the df array.  NEVER reset it to zero.
+!
+!  several precalculated Pencils of information are passed if for
+!  efficiency.
+!
+!   18-mar-21/axel: coded Faraday displacement current
+!   07-sep-25/alberto: coded charges from Higgs doublet
+!
+      use Diagnostics
+      use Mpicomm
+      use Sub
+!
+      real, contiguous, dimension(:,:,:,:) :: f
+      real, dimension(mx,my,mz,mvar) :: df
+      type(pencil_case) :: p
+!
+      real, dimension (nx,3) :: gtmp, dJdt
+      real, dimension (nx) :: tmp, tmp2, del2a0
+      real :: inflation_factor=0., mfpf=0., fppf=0.
+      integer :: j
+!
+      integer :: i
+!
+!  identify module and boundary conditions
+!
+      if (headtt.or.ldebug) print*,'dspecial_dt: SOLVE dSPECIAL_dt'
+      if (headtt) call identify_bcs('ee',iee)
+!
+!  Calculate rhs of Gamma equation and update curl
+!  Initialize tmp with axion term.
+!
+      ! call calc_axion_term(p,tmp)
+      call calc_axion_term(p,tmp,p%gphi,alpf,lphi_hom)
+      if (lwaterfall) then
+        call calc_axion_term(p,tmp2,p%gpsi,alpfpsi,lpsi_hom)
+        tmp=tmp+tmp2
+      endif
+!
+!  Solve for Gamma (unless lswitch_off_Gamma) and possibly for charge density.
+!  Add to the existing tmp and update df(l1:l2,m,n,irhoe).
+!
+      if (llongitudinalE) then
+        if (lsolve_chargedensity) tmp=tmp+f(l1:l2,m,n,irhoe)
+        ! add charge from Higgs field to Gauss constraint
+        if (lphi_doublet .and. lphi_hypercharge .and. coupl_gy /= 0) then
+          p%rhoe_higgsY=-coupl_gy*(p%phi*p%cov_der(:,1,2) - &
+                                   p%phi_doublet(:,1)*p%cov_der(:,1,1) + &
+                                   p%phi_doublet(:,2)*p%cov_der(:,1,4) - &
+                                   p%phi_doublet(:,3)*p%cov_der(:,1,3))
+          tmp = tmp + p%rhoe_higgsY
+        endif
+        if (lsolve_J0 .and. lJ0_no_disp) then
+!
+!  No displacement current: E and J^0 = div E come from Ohm's law, so use the
+!  Weyl-gauge form dGamma/dt = -J^0, consistent with Gamma = div A.
+!
+          if (.not.lswitch_off_Gamma) df(l1:l2,m,n,iGamma)=df(l1:l2,m,n,iGamma)-p%J0
+        elseif (.not.lswitch_off_Gamma) then
+          df(l1:l2,m,n,iGamma)=df(l1:l2,m,n,iGamma) &
+            -(1.-weight_longitudinalE)*p%divE-weight_longitudinalE*tmp
+        endif
+      endif
+!
+!  Solve dA/dt = -E.
+!
+      if (lmagnetic) then
+!
+!  Decide here about resistive versus temporal (Weyl) gauge
+!  Allow for possibility to limit the diffusivity factor,
+!  which is needed for early times when etaSchw can be huge.
+!
+        if (lresistive_gauge_disp) then
+          if (etaSchw_max==impossible) then
+            call multsv(etaSchw,p%graddiva,gtmp)
+          else
+            call multsv(min(etaSchw,etaSchw_max),p%graddiva,gtmp)
+          endif
+          df(l1:l2,m,n,iax:iaz)=df(l1:l2,m,n,iax:iaz)-p%el+gtmp
+        else
+          df(l1:l2,m,n,iax:iaz)=df(l1:l2,m,n,iax:iaz)-p%el
+        endif
+!
+!  Solve: dE/dt = curlB - mu*J
+!
+        if (lsolve_J0 .and. lJ0_no_disp) then
+!  No displacement current: E is set from Ohm's law in calc_pencils_special, not advanced.
+          df(l1:l2,m,n,iex:iez)=0.
+          dEdt=0.
+        elseif (ladvance_ee) then
+          !df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)+c_light2*(p%curlb-mu0*p%jj_ohm)
+          dEdt=c_light2*(p%curlb-mu0*p%jj_ohm)
+        else
+          df(l1:l2,m,n,iex:iez)=0.
+          dEdt=0.
+        endif
+!
+!  Solve for charge density
+!
+        if (lsolve_chargedensity) df(l1:l2,m,n,irhoe)=df(l1:l2,m,n,irhoe)-p%divJ
+!
+!  Magneto-genesis from reheating, following Subramanian (2010) and Sharma+17.
+!
+        if (beta_inflation/=0.) then
+!
+!  Compute f'/f and f''/f=fppf
+!
+          if (ip<14.and.lroot) print*,'scl_factor_target, Hp_target, appa_target, wweos_target=', &
+                                       scl_factor_target, Hp_target, appa_target, wweos_target
+          mfpf=beta_inflation*Hp_target
+          fppf=beta_inflation*((beta_inflation+1.)*Hp_target**2-appa_target)
+!
+!  In the papers by Subramanian (2010) and Sharma+17, as well as BS21,
+!  the calliographic variable curly-A=f*A was introduced to get rid of the
+!  first derivative of A. But the disadvantage is that the generation
+!  term, (f"/f)*<A.E> is then gauge-dependent. Because of this and other
+!  reasons, it is better to work with the original 2(f'/f)*A' = -2(f'/f)*E
+!  term, which is gauge-independent.
+!
+          if (lcurlyA) then
+            inflation_factor=fppf
+            !df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-c_light2*inflation_factor*p%aa
+            dEdt=dEdt-c_light2*inflation_factor*p%aa
+          else
+            inflation_factor=-2.*mfpf
+            !df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-c_light2*inflation_factor*p%el
+            dEdt=dEdt-c_light2*inflation_factor*p%el
+          endif
+          if (ip<14.and.lroot.and.lfirst) print*,'t, inflation_factor=',t, inflation_factor
+        endif
+!
+!  if particles, would add J=sum(qi*Vi*ni)
+!
+!  A0 equation: 3 terms
+!  dA0/dt = divA
+!  dAA/dt = ... + gradA0
+!
+        ! alberto: llorenz_gauge_disp can also be considered when
+        ! alpf=0, moved addition of del2a0 from conditions below
+        if (llorenz_gauge_disp) then
+          call del2(f,ia0,del2a0)
+          df(l1:l2,m,n,idiva_name)=df(l1:l2,m,n,idiva_name)+del2a0
+        endif
+
+!  helical term:
+!  dEE/dt = ... -alp/f (dphi*BB + gradphi x E)
+!  Use the combined routine multsv_add if both terms are included.
+!  Added possibility of limiter on generating term (dphi*B + gphi x E).
+!
+        if (ladvance_ee) then
+          if (alpf/=0.) then
+            call calc_helical_term(p,gtmp,p%dphi,p%gphi,lphi_hom)
+            if (ldensity .and. vA_limit>0) then
+              tmp=1./(1.+p%b2*p%rho1/vA_limit**2)
+              call multsv(tmp,gtmp,gtmp)
+            endif
+            !df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-alpf*gtmp
+            dEdt=dEdt-alpf*gtmp
+!
+            if (llorenz_gauge_disp) then
+              ! if (lphi_hom) then
+              !   df(l1:l2,m,n,idiva_name)=df(l1:l2,m,n,idiva_name)+del2a0
+              ! else
+              if (.not. lphi_hom) then
+                call dot(p%gphi,p%bb,tmp)
+                df(l1:l2,m,n,idiva_name)=df(l1:l2,m,n,idiva_name)+alpf*tmp
+              endif
+            endif
+          endif
+          if (lwaterfall .and. alpfpsi/=0.) then
+            call calc_helical_term(p,gtmp,p%dpsi,p%gpsi,lpsi_hom)
+            !df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)-alpfpsi*gtmp
+            dEdt=dEdt-alpfpsi*gtmp
+            if (llorenz_gauge_disp) then
+              if (.not. lpsi_hom) then
+                call dot(p%gpsi,p%bb,tmp)
+                df(l1:l2,m,n,idiva_name)=df(l1:l2,m,n,idiva_name)+alpfpsi*tmp
+              endif
+            endif
+          endif
+        endif
+!
+            !endif
+!
+!  Evolution of the equation for the scalar potential, moved below
+!
+            !df(l1:l2,m,n,ia0)=df(l1:l2,m,n,ia0)+p%diva
+            !df(l1:l2,m,n,ia0)=df(l1:l2,m,n,ia0)+f(l1:l2,m,n,idiva_name)
+            !df(l1:l2,m,n,iax:iaz)=df(l1:l2,m,n,iax:iaz)+p%ga0
+        !   endif
+        ! endif
+        ! alberto: If llorenz_gauge_disp, add the two terms to the A0 and A equations
+        ! here, so that they are always added, regardless of alpf.
+        if (llorenz_gauge_disp) then
+          df(l1:l2,m,n,ia0)=df(l1:l2,m,n,ia0)+f(l1:l2,m,n,idiva_name)
+          df(l1:l2,m,n,iax:iaz)=df(l1:l2,m,n,iax:iaz)+p%ga0
+        endif
+        !if (eta_ee/=0.) df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)+c_light2*eta_ee*p%del2ee
+        if (eta_ee/=0.) dEdt=dEdt+c_light2*eta_ee*p%del2ee
+!
+!  If Higgs doublet, add current from Higgs U(1) hypercharge.
+!
+        if (lphi_doublet .and. lphi_hypercharge .and. coupl_gy /= 0) then
+          ! compute jj_higgsY pencil (not done in calc_pencils_special as
+          ! pencils from other special modules might not be available there yet)
+          do i=1,3
+            p%jj_higgsY(:,i)=coupl_gy*(p%phi*p%cov_der(:,i+1,2) - &
+                      p%phi_doublet(:,1)*p%cov_der(:,i+1,1) + &
+                      p%phi_doublet(:,2)*p%cov_der(:,i+1,4) - &
+                      p%phi_doublet(:,3)*p%cov_der(:,i+1,3))
+          enddo
+          ! do i=1,3
+          !   df(l1:l2,m,n,iex+i-1)=df(l1:l2,m,n,iex+i-1) - &
+          !         coupl_gy*(p%phi*p%cov_der(:,i+1,2) - &
+          !         p%phi_doublet(:,1)*p%cov_der(:,i+1,1) + &
+          !         p%phi_doublet(:,2)*p%cov_der(:,i+1,4) - &
+          !         p%phi_doublet(:,3)*p%cov_der(:,i+1,3))
+          ! enddo
+          !df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez) - p%jj_higgsY
+          dEdt=dEdt-p%jj_higgsY
+        endif
+      endif
+!
+!  Add here dEdt to df(l1:l2,m,n,iex:iez)
+!
+      if (lpi_vecpot) then
+        if (ladvance_ee) then
+          do i=1,3
+            df(l1:l2,m,n,iaae+i-1)=df(l1:l2,m,n,iaae+i-1) &
+              +c_light2*p%bb(:,i)-alpf*f(l1:l2,m,n,iphi_f)*p%el(:,i)
+          enddo
+        endif
+        f(l1:l2,m,n,iex:iez)=p%el
+      else
+        if (ladvance_ee) df(l1:l2,m,n,iex:iez)=df(l1:l2,m,n,iex:iez)+dEdt
+      endif
+!
+!  Compute eedot_as_aux; currently ignore alpf/=0.
+!  28-feb-26/axel: this should be removed; it is not used.
+!
+      if (leedot_as_aux) f(l1:l2,m,n,iedotx:iedotz)=c_light2*(p%curlb-mu0*p%jj_ohm)
+!
+!  Evolving current
+!
+      if (lnoncollinear_EB .or. lnoncollinear_EB_aver &
+        .or. lcollinear_EB .or. lcollinear_EB_aver) then
+        if (lohm_evolve) then
+    !     if (tau_jj>0) then
+    !       tau1_jj=1./tau_jj
+    !       do j=1,3
+!
+!  Here we would need to add tau*sigmaB*B
+!
+    !         dJdt(:,j)=tau1_jj*(p%el(:,j)+p%uxb(:,j))*mu01/eta_total
+    !       enddo
+    !       if (ell_jj/=0.) then
+    !         call del2v(f,ijx,del2jj)
+    !         dJdt=dJdt+(ell_jj**2*tau1_jj)*del2jj
+    !       endif
+    !       df(l1:l2,m,n,ijx:ijz)=df(l1:l2,m,n,ijx:ijz)+dJdt
+    !     else
+!if (f(l1,m,n,ijx)==0.) then
+!  print*,'AXEL start j/=0 '
+!            do j=1,3
+!  f(l1:l2,m,n,ijx-1+j)=p%sigE*p%el(:,j)
+!            enddo
+!endif
+          do j=1,3
+            dJdt(:,j)=3.*Hscript*p%sigE*p%el(:,j)
+          enddo
+          df(l1:l2,m,n,ijx:ijz)=df(l1:l2,m,n,ijx:ijz)+dJdt
+        endif
+      endif
+!
+!  If ldensity and ldensity_add_je_heating, then compute J.E and add it:
+!  J.E has 2 contribution: we have J=sigE*(E+uxB), so E=-uxB+J/sigE.
+!  We already have the Lorentz for displacement current available.
+!  At early times, sigE is so small that J^2/sigE diverges, so we
+!  therefore allow for the possibility of turning of this option
+!  and heat just with J.E. Another option is sigE*E^2. Default is 
+!  ladvance_ee=T, lohmic_heating_ee=T, lohmic_heating_justee=F.
+!
+!  Summary (ldensity_add_je_heating=T):
+!  ladvance_ee=T, lohmic_heating_ee=T, lohmic_heating_justee=T !E^2*sigE (early times)
+!  ladvance_ee=T, lohmic_heating_ee=T, lohmic_heating_justee=F !J^2/sigE (later times)
+!  ladvance_ee=T, lohmic_heating_ee=F                          !J.E (normally not used)
+!  ladvance_ee=F, lohmic_heating_ee=T                          !J^2/sigE (late times)
+!  ladvance_ee=F, lohmic_heating_ee=F                          !J.E (normally not used)
+!
+      if (ldensity .and. ldensity_add_je_heating) then
+        if (ladvance_ee) then
+          if (lohmic_heating_ee) then
+            if (lohmic_heating_justee) then
+              if (lheating_averaged) then
+                tmp=e2m_all
+              else
+                call dot2_mn(p%el,tmp)
+              endif
+              tmp=tmp*p%sigE
+            else
+              call dot2_mn(p%jj,tmp)
+              tmp=tmp/p%sigE
+            endif
+          else
+            call dot(p%jj,p%el,tmp)
+          endif
+        else
+          if (lohmic_heating_ee) then
+            if (lheating_averaged) then
+              tmp=j2m_all
+            else
+              call dot2_mn(p%jj,tmp)
+            endif
+            tmp=tmp/p%sigE
+          else
+            call dot(p%jj,p%el,tmp)
+          endif
+        endif
+        if (je_heating_factor/=1.) tmp=tmp*je_heating_factor
+        df(l1:l2,m,n,ilnrho)=df(l1:l2,m,n,ilnrho)+tmp*p%rho1
+      endif
+!
+!  Add Lorentz force in displacement current module
+!
+      if (llorentzforce_ee) then
+        if (lrelativistic_eos) then
+          df(l1:l2,m,n,iux:iuz)=df(l1:l2,m,n,iux:iuz)+.75*p%jxbr
+        else
+          df(l1:l2,m,n,iux:iuz)=df(l1:l2,m,n,iux:iuz)+p%jxbr
+        endif
+      endif
+!
+!  If requested, put divE, sigE, or sigB into f array as auxiliaries.
+!
+      if (ldivE_as_aux) f(l1:l2,m,n,idivE)=p%divE
+      if (lsigE_as_aux) f(l1:l2,m,n,isigE)=p%sigE
+      if (lsigB_as_aux) f(l1:l2,m,n,isigB)=p%sigB
+!
+!  timestep constraint
+!
+      if (lfirst.and.ldt) advec_cs2=max(advec_cs2,c_light2*dxyz_2)
+!
+!  Detailed time step report.
+!
+      if (ldt_report) &
+        print*,'Time step report from disp_current.: minval(1/sqrt(advec_cs2))=',minval(1./sqrt(advec_cs2))
+!
+!  diagnostics
+!
+      if (ldiagnos) call calc_diagnostics_special(f,p)
+!
+    endsubroutine dspecial_dt
+!***********************************************************************
+    subroutine calc_diagnostics_special(f,p)
+!
+      use Sub
+      use Diagnostics
+!
+      real, contiguous, dimension(:,:,:,:) :: f
+      type(pencil_case) :: p
+      real, dimension(nx) :: tmp,tmp2,constrainteqn
+      real, dimension(nx,3) :: gtmp
+
+      call keep_compiler_quiet(f)
+
+      call save_name(get_mfpf(),idiag_mfpf)
+      call save_name(get_fppf(),idiag_fppf)
+      call save_name(scl_factor_target,idiag_afact)
+      if (idiag_EEEM/=0) call sum_mn_name(.5*(p%e2+p%b2),idiag_EEEM)
+      call sum_mn_name(p%el(:,1),idiag_exm)
+      call sum_mn_name(p%el(:,2),idiag_eym)
+      call sum_mn_name(p%el(:,3),idiag_ezm)
+      call sum_mn_name(etaSchw,idiag_etaSchw)
+      call sum_mn_name(etaArn,idiag_etaArn)
+      call sum_mn_name(p%sigE,idiag_sigEm)
+      call sum_mn_name(p%sigB,idiag_sigBm)
+      call sum_mn_name(p%eb,idiag_ebm)
+      if (idiag_sigErms/=0) call sum_mn_name(p%sigE**2,idiag_sigErms,lsqrt=.true.)
+      if (idiag_sigBrms/=0) call sum_mn_name(p%sigB**2,idiag_sigBrms,lsqrt=.true.)
+      if (idiag_sigEE2m/=0) call sum_mn_name(p%sigE*p%e2,idiag_sigEE2m)
+      if (idiag_sigBBEm/=0) call sum_mn_name(p%sigB*p%eb,idiag_sigBBEm)
+!
+!  Magnetic helicity and energy production from axion term:
+!  adphiBm denotes (alp/f)*phi'*E.B (for electric energy production).
+!  In the MHD case, when the displacement current can be neglected, we compute
+!  adphiB2m = (alp/f)*<etaSchw*dphi*B^2> and adphiJBm = (alp/f)*<etaSchw*dphi*J.B>.
+!
+      if (idiag_adphiBm/=0 .or. idiag_adphiBrms/=0 .or. &
+          idiag_adphiB2m/=0 .or. idiag_adphiJBm/=0) then
+        if (alpf/=0.) call calc_helical_term(p,gtmp,p%dphi,p%gphi,lphi_hom)
+        if (idiag_adphiBm/=0) then
+          call dot(alpf*gtmp,p%el,tmp)
+          call sum_mn_name(tmp,idiag_adphiBm)
+        endif
+        if (idiag_adphiB2m/=0) then
+          call dot(alpf*gtmp,p%bb,tmp)
+          call sum_mn_name(etaSchw*tmp,idiag_adphiB2m)
+        endif
+        if (idiag_adphiJBm/=0) then
+          call dot(alpf*gtmp,p%jj,tmp)
+          call sum_mn_name(etaSchw*tmp,idiag_adphiJBm)
+        endif
+        if (idiag_adphiBrms/=0) then
+          call dot2_mn(alpf*gtmp,tmp)
+          call sum_mn_name(tmp,idiag_adphiBrms,lsqrt=.true.)
+        endif
+      endif
+!
+      if (maxval(etaSchw)>0. .and. alpf/=0.) &
+        call sum_mn_name(etaSchw*alpf*p%dphi*p%b2,idiag_adphiB21m)
+!
+      if (idiag_Johmrms/=0 .or. idiag_J2sigEm/=0) then
+        call dot2_mn(p%jj_ohm,tmp)
+        call sum_mn_name(tmp,idiag_Johmrms,lsqrt=.true.)
+        call sum_mn_name(etaSchw*tmp,idiag_J2sigEm)
+      endif
+      if (idiag_curlBrms/=0) then
+        call dot2_mn(p%curlb,tmp)
+        call sum_mn_name(tmp,idiag_curlBrms,lsqrt=.true.)
+      endif
+!
+!  Calculate <u.(jxb)>.
+!
+      if (idiag_ujxb1m/=0) then
+        call dot(p%uu,p%jxb,tmp)
+        call sum_mn_name(tmp,idiag_ujxb1m)
+      endif
+!
+      call save_name(echarge,idiag_echarge)
+      call sum_mn_name(p%e2,idiag_erms,lsqrt=.true.)
+      call sum_mn_name(p%edot2,idiag_edotrms,lsqrt=.true.)
+      call max_mn_name(p%e2,idiag_emax,lsqrt=.true.)
+      if (idiag_eprimerms/=0) call sum_mn_name(p%eprime**2,idiag_eprimerms,lsqrt=.true.)
+      if (idiag_bprimerms/=0) call sum_mn_name(p%bprime**2,idiag_bprimerms,lsqrt=.true.)
+      if (idiag_jprimerms/=0) call sum_mn_name(p%jprime**2,idiag_jprimerms,lsqrt=.true.)
+      if (idiag_gam_EBrms/=0) call sum_mn_name(p%gam_EB**2,idiag_gam_EBrms,lsqrt=.true.)
+      if (idiag_boostprms/=0) call sum_mn_name(p%boost**2 ,idiag_boostprms,lsqrt=.true.)
+      if (idiag_a0rms/=0) call sum_mn_name(p%a0**2,idiag_a0rms,lsqrt=.true.)
+      if (idiag_BcurlEm/=0) then
+        call dot(p%bb,p%curlE,tmp)
+        call sum_mn_name(tmp,idiag_BcurlEm)
+      endif
+      if (idiag_BcurlBm/=0) then
+        call dot(p%bb,p%curlb,tmp)
+        call sum_mn_name(tmp,idiag_BcurlBm)
+      endif
+  !   if (lsolve_chargedensity) then
+      call sum_mn_name(p%rhoe,idiag_rhoem)
+      call sum_mn_name(p%count_eb0,idiag_count_eb0)
+      if (idiag_rhoerms/=0) call sum_mn_name(p%rhoe**2,idiag_rhoerms,lsqrt=.true.)
+  !   endif
+      if (idiag_divErms/=0) call sum_mn_name(p%divE**2,idiag_divErms,lsqrt=.true.)
+      if (idiag_J0rms/=0) call sum_mn_name(p%J0**2,idiag_J0rms,lsqrt=.true.)
+      if (idiag_gaussJ0rms/=0) call sum_mn_name((p%divE-p%J0)**2,idiag_gaussJ0rms,lsqrt=.true.)
+      if (idiag_divJrms/=0) call sum_mn_name(p%divJ**2,idiag_divJrms,lsqrt=.true.)
+!
+!  grms: Gamma - div(A), which accumulates the Gauss violation via the Gamma equation.
+!
+      if (idiag_grms/=0 .and. iGamma>0) &
+        call sum_mn_name((f(l1:l2,m,n,iGamma)-p%diva)**2,idiag_grms,lsqrt=.true.)
+!
+!  Diagnostics of the individual lsolve_J0 terms (stored in calc_pencils_special).
+!
+      if (lsolve_J0) then
+        if (idiag_gaussJ0max/=0) call max_mn_name(abs(p%divE-p%J0),idiag_gaussJ0max)
+        if (idiag_gaussdamprms/=0) call sum_mn_name( &
+            (p%lorentz_gamma*(p%divE-p%J0)/(mu0*eta))**2,idiag_gaussdamprms,lsqrt=.true.)
+        call sum_mn_name(diag_divJadv**2,idiag_divJadvrms,lsqrt=.true.)
+        call sum_mn_name(diag_divJohm**2,idiag_divJohmrms,lsqrt=.true.)
+        call sum_mn_name(diag_divJgam**2,idiag_divJgamrms,lsqrt=.true.)
+        call sum_mn_name(diag_J0u2,idiag_J0urms,lsqrt=.true.)
+        call sum_mn_name(diag_Jsig2,idiag_Jsigrms,lsqrt=.true.)
+        call sum_mn_name(diag_uE,idiag_uEm)
+        call sum_mn_name(diag_uE**2,idiag_uErms,lsqrt=.true.)
+        call sum_mn_name(diag_f0,idiag_f0m)
+        call sum_mn_name(diag_f0**2,idiag_f0rms,lsqrt=.true.)
+        call sum_mn_name(diag_fLor2,idiag_fLorrms,lsqrt=.true.)
+        call sum_mn_name(diag_fJ0E2,idiag_fJ0Erms,lsqrt=.true.)
+        call sum_mn_name(diag_fJxB2,idiag_fJxBrms,lsqrt=.true.)
+        call sum_mn_name(p%lorentz_gamma,idiag_gammam)
+        call max_mn_name(p%lorentz_gamma,idiag_gammamax)
+      endif
+      if (idiag_constrainteqn > 0) then
+        call calc_axion_term(p,tmp,p%gphi,alpf,lphi_hom)
+        call calc_constrainteqn(p,tmp,constrainteqn)
+        call sum_mn_name(constrainteqn,idiag_constrainteqn)
+      endif
+      if (idiag_constrainteqnrms > 0) then
+        call calc_axion_term(p,tmp,p%gphi,alpf,lphi_hom)
+        call calc_constrainteqn(p,tmp,constrainteqn)
+        call sum_mn_name(constrainteqn**2,idiag_constrainteqnrms,lsqrt=.true.)
+      endif
+      if (idiag_gausscrms/=0 .or. idiag_gaussprms/=0 .or. idiag_gaussnrms/=0) then
+        call dot(p%gphi,p%bb,tmp)
+        tmp=alpf*tmp
+        if (idiag_gaussnrms/=0) call sum_mn_name(tmp**2,idiag_gaussnrms,lsqrt=.true.)
+        if (idiag_gaussprms/=0) call sum_mn_name((p%divE+tmp)**2,idiag_gaussprms,lsqrt=.true.)
+        if (idiag_gausscrms/=0 .and. lbb_as_comaux .and. iphi_f>0) then
+          call div_phib(f,tmp2)
+          call sum_mn_name((p%divE+alpf*tmp2)**2,idiag_gausscrms,lsqrt=.true.)
+          if (idiag_divphib/=0) then
+            call sum_mn_name(tmp2**2,idiag_divphib,lsqrt=.true.)
+          endif
+        else
+          call sum_mn_name(spread(impossible,1,nx),idiag_gausscrms,lsqrt=.true.)
+        endif
+      endif
+      if (iaae>0) then
+        if (idiag_aaerms/=0) call sum_mn_name(sum(f(l1:l2,m,n,iaae:iaae+2)**2,2),idiag_aaerms,lsqrt=.true.)
+      endif
+
+      if (idiag_BdEdtm/=0) then
+        call dot(p%bb,dEdt,tmp)
+        call sum_mn_name(tmp,idiag_BdEdtm)
+      endif
+!
+!  Fractional timestep constraints.
+!
+      call max_mn_name(dtsrc_sigE,idiag_dtsigE,l_dt=.true.)
+      call max_mn_name(diffus_etaSchw/cdtv,idiag_dteta,l_dt=.true.)
+!
+!  Diagnostics.
+!
+      call calc_1d_diagnostics_special(p)
+!
+    endsubroutine calc_diagnostics_special
+!******************************************************************************
+    subroutine calc_1d_diagnostics_special(p)
+!
+!  2-D averages.
+!  Note that this does not necessarily happen with ldiagnos=.true.
+!
+!  13-sep-25/axel: adapted from magnetic
+!
+      use Diagnostics
+!
+      type(pencil_case) :: p
+!
+!  1d-averages. Happens at every it1d timesteps, NOT at every it1.
+!
+      if (l1davgfirst .or. (ldiagnos .and. ldiagnos_need_zaverages)) then
+        call yzsum_mn_name_x(p%e2, idiag_e2mx)
+        call xysum_mn_name_z(p%e2, idiag_e2mz)
+      endif
+!
+    endsubroutine calc_1d_diagnostics_special
+!***********************************************************************
+    subroutine read_special_init_pars(iomsg)
+!
+      use File_io, only: parallel_unit
+!
+      character(len=*), intent(out) :: iomsg
+      integer :: iostat
+!
+      read(parallel_unit, NML=special_init_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
+!
+    endsubroutine read_special_init_pars
+!***********************************************************************
+    subroutine write_special_init_pars(unit)
+!
+      integer, intent(in) :: unit
+!
+      write(unit, NML=special_init_pars)
+!
+    endsubroutine write_special_init_pars
+!***********************************************************************
+    subroutine read_special_run_pars(iomsg)
+!
+      use File_io, only: parallel_unit
+!
+      character(len=*), intent(out) :: iomsg
+      integer :: iostat
+!
+      read(parallel_unit, NML=special_run_pars, IOSTAT=iostat, IOMSG=iomsg)
+      if (iostat==0) iomsg=""
+!
+    endsubroutine read_special_run_pars
+!***********************************************************************
+    subroutine write_special_run_pars(unit)
+!
+      integer, intent(in) :: unit
+!
+      write(unit, NML=special_run_pars)
+!
+    endsubroutine write_special_run_pars
+!***********************************************************************
+    subroutine rprint_special(lreset,lwrite)
+!
+!  reads and registers print parameters relevant to special
+!
+!   06-oct-03/tony: coded
+!
+      use Diagnostics
+      use FArrayManager, only: farray_index_append
+      use Sub
+!
+!  define counters
+!
+      logical :: lreset
+      logical, optional :: lwrite
+      integer :: iname,inamex,inamez
+      logical :: lwr
+!
+      lwr = .false.
+      if (present(lwrite)) lwr=lwrite
+!
+!  reset everything in case of reset
+!  (this needs to be consistent with what is defined above!)
+!
+      if (lreset) then
+        idiag_EEEM=0; idiag_erms=0; idiag_exm=0;idiag_eym=0;  idiag_ezm=0; idiag_emax=0
+        idiag_edotrms=0; idiag_a0rms=0; idiag_grms=0; idiag_da0rms=0; idiag_BcurlEm=0; idiag_BcurlBm=0
+        idiag_mfpf=0; idiag_fppf=0; idiag_afact=0
+        idiag_rhoerms=0; idiag_divErms=0; idiag_divJrms=0; idiag_J0rms=0; idiag_gaussJ0rms=0
+        idiag_gaussJ0max=0; idiag_gaussdamprms=0; idiag_divJadvrms=0; idiag_divJohmrms=0
+        idiag_divJgamrms=0; idiag_J0urms=0; idiag_Jsigrms=0; idiag_uEm=0; idiag_uErms=0
+        idiag_f0m=0; idiag_f0rms=0; idiag_fLorrms=0; idiag_fJ0Erms=0; idiag_fJxBrms=0
+        idiag_gammam=0; idiag_gammamax=0
+        idiag_rhoem=0; idiag_count_eb0=0; idiag_divEm=0; idiag_divJm=0; idiag_constrainteqn=0
+        idiag_constrainteqnrms=0; idiag_gausscrms=0; idiag_gaussprms=0; idiag_gaussnrms=0
+        idiag_aaerms=0; idiag_divphib=0;
+        idiag_dteta=0; idiag_dtsigE=0; idiag_etaSchw=0; idiag_etaArn=0
+        idiag_sigEm=0; idiag_sigBm=0; idiag_sigErms=0; idiag_sigBrms=0
+        idiag_ebm=0; idiag_Johmrms=0; idiag_J2sigEm=0; idiag_curlBrms=0; idiag_BdEdtm=0
+        idiag_adphiBm=0; idiag_adphiB2m=0; idiag_adphiB21m=0; idiag_adphiJBm=0;
+        idiag_adphiBrms=0; idiag_ujxb1m=0; idiag_sigEE2m=0; idiag_sigBBEm=0
+        idiag_eprimerms=0; idiag_bprimerms=0; idiag_jprimerms=0; idiag_gam_EBrms=0; 
+        idiag_boostprms=0; idiag_echarge=0; idiag_e2mx=0; idiag_e2mz=0
+        cformv=''
+      endif
+!
+!  check for those quantities that we want to evaluate online
+!
+      do iname=1,nname
+        call parse_name(iname,cname(iname),cform(iname),'EEEM',idiag_EEEM)
+        call parse_name(iname,cname(iname),cform(iname),'erms',idiag_erms)
+        call parse_name(iname,cname(iname),cform(iname),'exm',idiag_exm)
+        call parse_name(iname,cname(iname),cform(iname),'eym',idiag_eym)
+        call parse_name(iname,cname(iname),cform(iname),'ezm',idiag_ezm)
+        call parse_name(iname,cname(iname),cform(iname),'eprimerms',idiag_eprimerms)
+        call parse_name(iname,cname(iname),cform(iname),'bprimerms',idiag_bprimerms)
+        call parse_name(iname,cname(iname),cform(iname),'jprimerms',idiag_jprimerms)
+        call parse_name(iname,cname(iname),cform(iname),'gam_EBrms',idiag_gam_EBrms)
+        call parse_name(iname,cname(iname),cform(iname),'boostprms',idiag_boostprms)
+        call parse_name(iname,cname(iname),cform(iname),'edotrms',idiag_edotrms)
+        call parse_name(iname,cname(iname),cform(iname),'emax',idiag_emax)
+        call parse_name(iname,cname(iname),cform(iname),'a0rms',idiag_a0rms)
+        call parse_name(iname,cname(iname),cform(iname),'grms',idiag_grms)
+        call parse_name(iname,cname(iname),cform(iname),'da0rms',idiag_da0rms)
+        call parse_name(iname,cname(iname),cform(iname),'BcurlEm',idiag_BcurlEm)
+        call parse_name(iname,cname(iname),cform(iname),'BcurlBm',idiag_BcurlBm)
+        call parse_name(iname,cname(iname),cform(iname),'divErms',idiag_divErms)
+        call parse_name(iname,cname(iname),cform(iname),'divJrms',idiag_divJrms)
+        call parse_name(iname,cname(iname),cform(iname),'rhoerms',idiag_rhoerms)
+        call parse_name(iname,cname(iname),cform(iname),'J0rms',idiag_J0rms)
+        call parse_name(iname,cname(iname),cform(iname),'gaussJ0rms',idiag_gaussJ0rms)
+        call parse_name(iname,cname(iname),cform(iname),'gaussJ0max',idiag_gaussJ0max)
+        call parse_name(iname,cname(iname),cform(iname),'gaussdamprms',idiag_gaussdamprms)
+        call parse_name(iname,cname(iname),cform(iname),'divJadvrms',idiag_divJadvrms)
+        call parse_name(iname,cname(iname),cform(iname),'divJohmrms',idiag_divJohmrms)
+        call parse_name(iname,cname(iname),cform(iname),'divJgamrms',idiag_divJgamrms)
+        call parse_name(iname,cname(iname),cform(iname),'J0urms',idiag_J0urms)
+        call parse_name(iname,cname(iname),cform(iname),'Jsigrms',idiag_Jsigrms)
+        call parse_name(iname,cname(iname),cform(iname),'uEm',idiag_uEm)
+        call parse_name(iname,cname(iname),cform(iname),'uErms',idiag_uErms)
+        call parse_name(iname,cname(iname),cform(iname),'f0m',idiag_f0m)
+        call parse_name(iname,cname(iname),cform(iname),'f0rms',idiag_f0rms)
+        call parse_name(iname,cname(iname),cform(iname),'fLorrms',idiag_fLorrms)
+        call parse_name(iname,cname(iname),cform(iname),'fJ0Erms',idiag_fJ0Erms)
+        call parse_name(iname,cname(iname),cform(iname),'fJxBrms',idiag_fJxBrms)
+        call parse_name(iname,cname(iname),cform(iname),'gammam',idiag_gammam)
+        call parse_name(iname,cname(iname),cform(iname),'gammamax',idiag_gammamax)
+        call parse_name(iname,cname(iname),cform(iname),'divEm',idiag_divEm)
+        call parse_name(iname,cname(iname),cform(iname),'divJm',idiag_divJm)
+        call parse_name(iname,cname(iname),cform(iname),'rhoem',idiag_rhoem)
+        call parse_name(iname,cname(iname),cform(iname),'count_eb0',idiag_count_eb0)
+        call parse_name(iname,cname(iname),cform(iname),'etaSchw',idiag_etaSchw)
+        call parse_name(iname,cname(iname),cform(iname),'etaArn',idiag_etaArn)
+        call parse_name(iname,cname(iname),cform(iname),'dtsigE',idiag_dtsigE)
+        call parse_name(iname,cname(iname),cform(iname),'dteta',idiag_dteta)
+        call parse_name(iname,cname(iname),cform(iname),'sigEm',idiag_sigEm)
+        call parse_name(iname,cname(iname),cform(iname),'sigBm',idiag_sigBm)
+        call parse_name(iname,cname(iname),cform(iname),'ebm',idiag_ebm)
+        call parse_name(iname,cname(iname),cform(iname),'sigErms',idiag_sigErms)
+        call parse_name(iname,cname(iname),cform(iname),'sigBrms',idiag_sigBrms)
+        call parse_name(iname,cname(iname),cform(iname),'sigEE2m',idiag_sigEE2m)
+        call parse_name(iname,cname(iname),cform(iname),'sigBBEm',idiag_sigBBEm)
+        call parse_name(iname,cname(iname),cform(iname),'BdEdtm',idiag_BdEdtm)
+        call parse_name(iname,cname(iname),cform(iname),'adphiBm',idiag_adphiBm)
+        call parse_name(iname,cname(iname),cform(iname),'adphiB2m',idiag_adphiB2m)
+        call parse_name(iname,cname(iname),cform(iname),'adphiB21m',idiag_adphiB21m)
+        call parse_name(iname,cname(iname),cform(iname),'adphiJBm',idiag_adphiJBm)
+        call parse_name(iname,cname(iname),cform(iname),'ujxb1m',idiag_ujxb1m)
+        call parse_name(iname,cname(iname),cform(iname),'adphiBrms',idiag_adphiBrms)
+        call parse_name(iname,cname(iname),cform(iname),'Johmrms',idiag_Johmrms)
+        call parse_name(iname,cname(iname),cform(iname),'J2sigEm',idiag_J2sigEm)
+        call parse_name(iname,cname(iname),cform(iname),'curlBrms',idiag_curlBrms)
+        call parse_name(iname,cname(iname),cform(iname),'echarge',idiag_echarge)
+        call parse_name(iname,cname(iname),cform(iname),'mfpf',idiag_mfpf)
+        call parse_name(iname,cname(iname),cform(iname),'fppf',idiag_fppf)
+        call parse_name(iname,cname(iname),cform(iname),'afact',idiag_afact)
+        call parse_name(iname,cname(iname),cform(iname),'constrainteqn',idiag_constrainteqn)
+        call parse_name(iname,cname(iname),cform(iname),'constrainteqnrms',idiag_constrainteqnrms)
+        call parse_name(iname,cname(iname),cform(iname),'gausscrms',idiag_gausscrms)
+        call parse_name(iname,cname(iname),cform(iname),'gaussprms',idiag_gaussprms)
+        call parse_name(iname,cname(iname),cform(iname),'gaussnrms',idiag_gaussnrms)
+        call parse_name(iname,cname(iname),cform(iname),'aaerms',idiag_aaerms)
+        call parse_name(iname,cname(iname),cform(iname),'divphib',idiag_divphib)
+      enddo
+!
+!  Check for those quantities for which we want yz-averages.
+!
+      do inamex=1,nnamex
+        call parse_name(inamex,cnamex(inamex),cformx(inamex),'e2mx',idiag_e2mx)
+      enddo
+!
+!  Check for those quantities for which we want xy-averages.
+!
+      do inamez=1,nnamez
+        call parse_name(inamez,cnamez(inamez),cformz(inamez),'exmz',idiag_exmz)
+        call parse_name(inamez,cnamez(inamez),cformz(inamez),'eymz',idiag_eymz)
+        call parse_name(inamez,cnamez(inamez),cformz(inamez),'ezmz',idiag_ezmz)
+        call parse_name(inamez,cnamez(inamez),cformz(inamez),'e2mz',idiag_e2mz)
+      enddo
+!
+!  check for those quantities for which we want video slices
+!
+      if (lwrite_slices) then
+        where(cnamev=='ee') cformv='DEFINED'
+        !where(cnamev=='ee' .or. cnamev=='sigE' .or. cnamev=='sigB') cformv='DEFINED'
+      endif
+!
+!  write column where which magnetic variable is stored
+!
+      if (lwr) then
+      endif
+!
+    endsubroutine rprint_special
+!***********************************************************************
+    subroutine div_phib(f,d)
+!
+!  div(phi*B) with the der stencil applied to phi*B evaluated at the stencil
+!  points. Needed for checking the constraint since no product rule exists for discrete
+!  derivatives.
+!
+!  26-sep-26/TP: coded
+!
+      real, dimension (mx,my,mz,mfarray), intent(in) :: f
+      real, dimension (nx), intent(out) :: d
+      real, parameter :: a=1.0/60.0, c(3)=(/45.0,-9.0,1.0/)
+      integer :: s
+!
+      d=0.
+      do s=1,3
+        if (nxgrid>1) d=d+a*dx_1(l1:l2)*c(s)*( &
+          f(l1+s:l2+s,m,n,iphi_f)*f(l1+s:l2+s,m,n,ibx)-f(l1-s:l2-s,m,n,iphi_f)*f(l1-s:l2-s,m,n,ibx))
+        if (nygrid>1) d=d+a*dy_1(m)*c(s)*( &
+          f(l1:l2,m+s,n,iphi_f)*f(l1:l2,m+s,n,iby)-f(l1:l2,m-s,n,iphi_f)*f(l1:l2,m-s,n,iby))
+        if (nzgrid>1) d=d+a*dz_1(n)*c(s)*( &
+          f(l1:l2,m,n+s,iphi_f)*f(l1:l2,m,n+s,ibz)-f(l1:l2,m,n-s,iphi_f)*f(l1:l2,m,n-s,ibz))
+      enddo
+!
+    endsubroutine div_phib
+!***********************************************************************
+    subroutine init_aae(f)
+!
+!  A_e from Pi0 = E + alpf*phi*curl A by a discrete inverse curl in Fourier space,
+!  using the effective wavenumber of the der stencil:
+!     A_e_k = i k_eff x Pi_k / |k_eff|^2   =>   curl A_e = transverse part of Pi0.
+!  Modes with k_eff = 0 (k=0 and Nyquist-only) cannot be represented and are dropped.
+!  Then E = curl A_e - alpf*phi*curl A is stored in the 'ee' slot.
+!
+!  26-sep-26/TP: coded
+!
+      use Fourier, only: fft_xyz_parallel
+      use Sub, only: curl
+!
+      real, dimension (mx,my,mz,mfarray), intent(inout) :: f
+      real, dimension (:,:,:,:), allocatable :: pre, pim, cre, cim
+      real, dimension (nx,3) :: bb, pp
+      real, dimension (nx) :: kex
+      real, dimension (ny) :: key
+      real, dimension (nz) :: kez
+      real :: k2, kv(3)
+      integer :: i, j, ik, iy, iz
+!
+      allocate(pre(nx,ny,nz,3),pim(nx,ny,nz,3),cre(nx,ny,nz,3),cim(nx,ny,nz,3))
+!
+      do n=n1,n2; do m=m1,m2
+        call curl(f,iaa,bb)
+        do j=1,3
+          pre(:,m-m1+1,n-n1+1,j)=f(l1:l2,m,n,iex+j-1)+alpf*f(l1:l2,m,n,iphi_f)*bb(:,j)
+        enddo
+      enddo; enddo
+
+      pim=0.
+      do j=1,3
+        call fft_xyz_parallel(pre(:,:,:,j),pim(:,:,:,j))
+      enddo
+
+      do i=1,nx; ik=ipx*nx+i-1; if (ik>nxgrid/2) ik=ik-nxgrid; kex(i)=keff(ik,nxgrid,dx); enddo
+      do i=1,ny; ik=ipy*ny+i-1; if (ik>nygrid/2) ik=ik-nygrid; key(i)=keff(ik,nygrid,dy); enddo
+      do i=1,nz; ik=ipz*nz+i-1; if (ik>nzgrid/2) ik=ik-nzgrid; kez(i)=keff(ik,nzgrid,dz); enddo
+
+      cre=0.; cim=0.
+      do iz=1,nz; do iy=1,ny; do i=1,nx
+        kv=(/kex(i),key(iy),kez(iz)/)
+        k2=sum(kv**2)
+        if (k2>0.) then
+!
+!  A_e = i k x P / k^2  ->  A_e_re = -(k x P_im)/k^2,  A_e_im = (k x P_re)/k^2
+!
+          cre(i,iy,iz,1)=-(kv(2)*pim(i,iy,iz,3)-kv(3)*pim(i,iy,iz,2))/k2
+          cre(i,iy,iz,2)=-(kv(3)*pim(i,iy,iz,1)-kv(1)*pim(i,iy,iz,3))/k2
+          cre(i,iy,iz,3)=-(kv(1)*pim(i,iy,iz,2)-kv(2)*pim(i,iy,iz,1))/k2
+          cim(i,iy,iz,1)= (kv(2)*pre(i,iy,iz,3)-kv(3)*pre(i,iy,iz,2))/k2
+          cim(i,iy,iz,2)= (kv(3)*pre(i,iy,iz,1)-kv(1)*pre(i,iy,iz,3))/k2
+          cim(i,iy,iz,3)= (kv(1)*pre(i,iy,iz,2)-kv(2)*pre(i,iy,iz,1))/k2
+        endif
+      enddo; enddo; enddo
+!
+      do j=1,3
+        call fft_xyz_parallel(cre(:,:,:,j),cim(:,:,:,j),linv=.true.)
+        f(l1:l2,m1:m2,n1:n2,iaae+j-1)=cre(:,:,:,j)
+      enddo
+      deallocate(pre,pim,cre,cim)
+!
+!  Boundcond cannot be used here (it uses Special), so update_ghosts is called
+!  through the pointer set in initialize_boundcond.
+!
+      call update_ghosts_ptr(f,iaae,iaae+2)
+      do n=n1,n2; do m=m1,m2
+        call curl(f,iaa,bb)
+        call curl(f,iaae,pp)
+        do j=1,3
+          f(l1:l2,m,n,iex+j-1)=pp(:,j)-alpf*f(l1:l2,m,n,iphi_f)*bb(:,j)
+        enddo
+      enddo; enddo
+!
+    contains
+!------------------------------------------------------------------------
+      real function keff(ik,ngrid,dxx)
+!
+!  Effective wavenumber of the 2nd/4th/6th-order centred first derivative.
+!
+        integer, intent(in) :: ik, ngrid
+        real, intent(in) :: dxx
+        real :: th
+!
+        if (ngrid==1) then; keff=0.; return; endif
+        th=2.*pi*ik/ngrid
+
+        select case (nghost)
+          case (1); keff=sin(th)/dxx
+          case (2); keff=(4./3.*sin(th)-1./6.*sin(2*th))/dxx
+          case default; keff=(1.5*sin(th)-0.3*sin(2*th)+sin(3*th)/30.)/dxx
+        endselect
+
+      endfunction keff
+
+    endsubroutine init_aae
+!***********************************************************************
+    subroutine special_after_boundary(f)
+!
+!  Possibility to modify the f array after the boundaries are communicated.
+!
+!  06-jul-06/tony: coded
+!
+      use Mpicomm, only: mpibcast_real
+!
+      real, contiguous, dimension(:,:,:,:) :: f
+      logical :: lmessage_sigE_quenching_activated=.true.
+!
+!  Possibility of limiting sigE by reducing the prefactor
+!
+      if (sigEmax/=impossible .and. lroot) then
+        sigE_prefactor=1./(1.+sigEm_all/sigEmax)
+        if (lmessage_sigE_quenching_activated .and. sigE_prefactor<1.) then
+          print*,'sigE quenching activated'
+          lmessage_sigE_quenching_activated=.false.
+        endif
+      endif
+      call mpibcast_real(sigE_prefactor)
+!
+      call keep_compiler_quiet(f)
+!
+    endsubroutine special_after_boundary
+!***********************************************************************
+    subroutine get_slices_special(f,slices)
+!
+!  Write slices for animation of electric potential
+!
+!  26-feb-07/axel: adapted from gross_pitaevskii
+!
+      use Slices_methods, only: assign_slices_vec
+!
+      real, contiguous, dimension(:,:,:,:) :: f
+      type(slice_data) :: slices
+!
+!  Loop over slices
+!
+      select case (trim(slices%name))
+!
+!  Electric field.
+!
+      case ('ee');   call assign_slices_vec (slices,f,iee)
+      !case ('sigE'); call assign_slices_scal(slices,f,isigE)
+      !case ('sigB'); call assign_slices_scal(slices,f,isigB)
+!
+      endselect
+!
+    endsubroutine get_slices_special
+!***********************************************************************
+    subroutine load_variables_to_gpu_special
+
+      use Gpu, only: update_on_gpu
+
+      real, save :: Hp_old=0.,appa_old=0.
+      integer, save :: Hp_index_on_gpu=-1
+      integer, save :: appa_index_on_gpu=-1
+
+      if (beta_inflation/=0.) then
+!
+!  We need Hp_target (=H=a'/a) and appa_target (=a''/a). We get it from
+!  subroutine calc_scl_factor, which is called from src/run.f90 when
+!  lread_scl_factor_file_new=T. It is independent of the routine src/special/Lambda_CDM.f90,
+!  which integrates ascale, Hubble, and tphys that are used in other routines.
+!
+        select case (aderiv_scaling)
+          case ('table')
+            if (.not.lread_scl_factor_file_new) &
+              call fatal_error('load_variables_to_gpu','lread_scl_factor_file_new must be .true.')
+          case ('matter-dominated')
+            if (t==0.) call fatal_error('load_variables_to_gpu_special','t cannot be zero initially')
+            Hp_target=2./t
+            appa_target=2./t**2
+          case default
+            call fatal_error('load_variables_to_gpu','no such aderiv_scaling: "'//trim(aderiv_scaling)//'"')
+        endselect
+
+        if (lgpu) then
+          if (Hp_old /= Hp_target) call update_on_gpu(Hp_index_on_gpu,'AC_hp_target__mod__cdata',Hp_target)
+          if (appa_old /= appa_target) call update_on_gpu(appa_index_on_gpu,'AC_appa_target__mod__cdata',appa_target)
+        endif
+        Hp_old = Hp_target
+        appa_old = appa_target
+      endif
+
+    endsubroutine load_variables_to_gpu_special
+!***********************************************************************
+    subroutine pushpars2c(p_par)
+
+      use General, only: string_to_enum
+      use Syscalls, only: copy_addr
+
+      integer, parameter :: n_pars=100
+      integer(KIND=ikind8), dimension(n_pars) :: p_par
+
+      call copy_addr(alpf,p_par(1))
+      call copy_addr(eta_ee,p_par(2))
+      call copy_addr(sige_prefactor,p_par(3))
+      call copy_addr(sigb_prefactor,p_par(4))
+      call copy_addr(mass_chi,p_par(5))
+      call copy_addr(igamma,p_par(6)) ! int
+      call copy_addr(ia0,p_par(7)) ! int
+      call copy_addr(idiva_name,p_par(8)) ! int
+      call copy_addr(llongitudinale,p_par(9)) ! bool
+      call copy_addr(llorenz_gauge_disp,p_par(10)) ! bool
+      call copy_addr(lphi_hom,p_par(11)) ! bool
+      call copy_addr(lnoncollinear_eb,p_par(12)) ! bool
+      call copy_addr(lnoncollinear_eb_aver,p_par(13)) ! bool
+      call copy_addr(lcollinear_eb,p_par(14)) ! bool
+      call copy_addr(lcollinear_eb_aver,p_par(15)) ! bool
+      call copy_addr(leedot_as_aux,p_par(16)) ! bool
+      call copy_addr(lcurlya,p_par(17)) ! bool
+      call copy_addr(lsolve_chargedensity,p_par(18)) ! bool
+      call copy_addr(ldive_as_aux,p_par(19)) ! bool
+      call copy_addr(lsige_as_aux,p_par(20)) ! bool
+      call copy_addr(lsigb_as_aux,p_par(21)) ! bool
+      call copy_addr(lallow_bprime_zero,p_par(22)) ! bool
+      call copy_addr(lswitch_off_divj,p_par(23)) ! bool
+      call copy_addr(lswitch_off_gamma,p_par(24)) ! bool
+      call copy_addr(lmass_suppression,p_par(25)) ! bool
+      call copy_addr(beta_inflation,p_par(26))
+      call copy_addr(c_light2,p_par(27))
+      call copy_addr(lapply_gamma_corr,p_par(31)) ! bool
+      call copy_addr(lphi_linear_regime,p_par(32)) ! bool
+      call copy_addr(weight_longitudinale,p_par(33))
+      call copy_addr(alpfpsi,p_par(34))
+      call copy_addr(coupl_gy,p_par(35))
+      call copy_addr(lpsi_hom,p_par(36)) ! bool
+      call copy_addr(iedotx,p_par(40)) ! int
+      call copy_addr(iedoty,p_par(41)) ! int
+      call copy_addr(iedotz,p_par(42)) ! int
+      call copy_addr(irhoe,p_par(43)) ! int
+      call copy_addr(llorentzforce_ee,p_par(44)) ! bool
+      call copy_addr(ldensity_add_je_heating,p_par(45)) ! bool
+      call copy_addr(je_heating_factor,p_par(46))
+      call copy_addr(va_limit,p_par(47))
+
+      call copy_addr(lohmic_heating_ee,p_par(48)) ! bool
+      call copy_addr(ladvance_ee,p_par(49)) ! bool
+      call copy_addr(lohmic_heating_justee,p_par(50)) ! bool
+      call copy_addr(eta_given,p_par(51))
+      call copy_addr(cdt_sige,p_par(52))
+      call copy_addr(ldt_disp_current,p_par(53)) ! bool
+      call copy_addr(sige_ceiling,p_par(54))
+      call copy_addr(sige_const_value,p_par(55))
+      call copy_addr(lresistive_gauge_ee,p_par(56)) ! bool
+      call copy_addr(etaschw_max,p_par(57))
+      call copy_addr(lresistive_gauge_disp,p_par(58)) ! bool
+      call copy_addr(llate_reset_el_pencil,p_par(59)) ! bool
+      call copy_addr(linclude_dphib_in_mhd,p_par(60)) ! bool
+      call copy_addr(linclude_gphixe_in_mhd,p_par(61)) ! bool
+
+      call copy_addr(lcorrect_sign_adphib_term,p_par(62)) ! bool
+      call copy_addr(lignore_adphib_term_in_mhd_current,p_par(63)) ! bool
+
+      call copy_addr(sige_arnold_prefactor,p_par(65))
+      call copy_addr(lreplace_schwinger_by_arnold,p_par(66)) ! bool
+      call copy_addr(lna1_switch_toarnold,p_par(67))
+      call copy_addr(lna2_switch_toarnold,p_par(68))
+      call copy_addr(idiag_etaarn,p_par(69)) ! int
+      call string_to_enum(enum_replace_schwinger_by_arnold,replace_schwinger_by_arnold)
+      call copy_addr(enum_replace_schwinger_by_arnold,p_par(70)) ! int
+
+      call copy_addr(lheating_averaged,p_par(71)) ! bool
+      call copy_addr(charge_flow_factor,p_par(72))
+      call copy_addr(charge_flow_limiter,p_par(73))
+      call copy_addr(lcharge_flow,p_par(74)) ! bool
+      call copy_addr(lpi_vecpot,p_par(75)) ! bool
+      call copy_addr(iaae,p_par(76)) ! int
+      call copy_addr(iphi_f,p_par(77)) ! int
+
+    endsubroutine pushpars2c
+!***********************************************************************
+!********************************************************************
+!************        DO NOT DELETE THE FOLLOWING       **************
+!********************************************************************
+!**  This is an automatically generated include file that creates  **
+!**  copies dummy routines from nospecial.f90 for any Special      **
+!**  routines not implemented in this file                         **
+!**                                                                **
+    include '../special_dummies.inc'
+!********************************************************************
+endmodule Special

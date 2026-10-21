@@ -1,0 +1,2 @@
+run:run_pars:nt=600
+run:viscosity_run_pars:nu=2e-2

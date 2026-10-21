@@ -1,0 +1,5 @@
+run:run_pars:nt=600
+run:viscosity_run_pars:nu=2e-2
+run:special_run_pars:weight_longitudinalE=0.
+run:special_run_pars:lJ0_divE_in_divJ=T
+start:special_init_pars:ampl_J0pert=1e-3, k_J0pert=2.

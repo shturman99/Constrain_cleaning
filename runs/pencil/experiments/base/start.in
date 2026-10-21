@@ -1,0 +1,34 @@
+!  -*-f90-*-  (for Emacs)    vim:set filetype=fortran:  (for vim)
+!
+!  Initialisation parameters: lsolve_J0 experiments (overridden per run, see OVERRIDES).
+!  Deterministic, smooth initial conditions (k=1,2 modes in a 2pi box),
+!  so that all resolutions start from the same physical state.
+!
+&init_pars
+  cvsid='experiments',
+  unit_system='set', c_light_set=1.
+  xyz_units='pi','pi','pi'
+  xyz0=-1.,-1.,-1.
+  xyz1=+1.,+1.,+1.
+  lwrite_aux=T
+  lwrite_ic=T
+/
+&eos_init_pars
+  gamma=1.
+/
+&hydro_init_pars
+  inituu='ABC', ampluu=0.1, kx_uu=1., ky_uu=1., kz_uu=1.  ! |u|max ~ 0.25, gamma_max ~ 1.03
+/
+&density_init_pars
+  lrelativistic_eos=T
+/
+&magnetic_init_pars
+  learly_set_el_pencil=T
+  initaa='Beltrami-x', amplaa=0.1, kx_aa=1.
+/
+&special_init_pars
+  initee='coswave-phase'
+  ampl_ex=0.05, kx_ex=1.  ! longitudinal: div E = -0.05 sin(x), so J0 /= 0 initially
+  ampl_ey=0.05, kz_ey=2.  ! transverse
+  lsolve_chargedensity=T, lsolve_J0=T
+/

@@ -1,0 +1,41 @@
+!  -*-f90-*-  (for Emacs)    vim:set filetype=fortran:  (for vim)
+!
+!  Run parameters: lsolve_J0 experiments (t = 0 .. 5).
+!  Same fixed dt at all resolutions (5e-3 is below the light/viscous limits
+!  even at 128^3), so differences between runs are spatial-discretization errors.
+!
+&run_pars
+  cvsid="e04bc7692"
+  nt=1000, it1=10, dsnap=0.5, dvid=1e9, isave=1000, ialive=100
+  lpencil_check_small=F
+  lread_aux=F
+  dt=5e-3
+/
+&eos_run_pars
+/
+&hydro_run_pars
+  lupw_uu=T
+  lext_force=T, lrelativistic=T
+/
+&density_run_pars
+  lupw_lnrho=T
+  lrelativistic_eos=T
+/
+&forcing_run_pars
+  iforce='helical', force=0.  ! no forcing: deterministic decaying run
+/
+&magnetic_run_pars
+  lupw_aa=F
+  eta=8.4e-2, scl_uxb_in_ohm=1.  ! sigma = 1/eta ~ 12
+  llorentzforce=F  ! JxB enters via the Lorentz four-force (ext_force) instead
+  eta=1.
+/
+&viscosity_run_pars
+  nu=5e-3
+/
+&power_spectrum_run_pars
+/
+&special_run_pars
+  ldivE_as_aux=T
+  lsolve_J0=T
+/
