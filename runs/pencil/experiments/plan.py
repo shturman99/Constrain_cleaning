@@ -23,6 +23,8 @@ Suites
      with/without the J0-for-div(E) substitution in div J, each without and with an initial
      Gauss violation J0 += 1e-3 sin(2y); a sigma scan of the cleaning rate.
   R  resolution checks of key A/D/G runs at 32^3 and 128^3.
+  E  error decomposition (coarse vs reference) at sigma=1 with/without enforcement and for an
+     under-resolved fast flow; 32/64/128, snapshots every 0.25.
 """
 import os, subprocess, sys, time
 from fnmatch import fnmatch
@@ -87,6 +89,16 @@ for N in ["T032", "T128"]:
     add(f"R/G_w2_N{n}", N)
     add(f"R/G_w0_divE_N{n}", N, GVAR["w0_divE"])
     add(f"R/G_w2_pert_N{n}", N, PERT)
+
+# E: coarse-vs-reference error decomposition (src/constrain_cleaning/pencil_error.py) in regimes where
+# the constraint violation may matter: weak conductivity (with/without enforcement) and an
+# under-resolved fast flow (nu=5e-3, see v1/probe). Snapshots every 0.25; 32/64/128 for each case.
+ECASES = {"sig1": eta("1."),
+          "sig1_noenf": eta("1.") + GVAR["w0_divE"],
+          "underres": FAST() + ["run:viscosity_run_pars:nu=5e-3", "run:run_pars:nt=700"]}
+for c, ov in ECASES.items():
+    for N in ["T032", "T064", "T128"]:
+        add(f"E/{c}_N{N[1:]}", N, ov, ["run:run_pars:dsnap=0.25"])
 
 
 def status(name):
