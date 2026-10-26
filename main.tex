@@ -224,8 +224,12 @@ Let us first consider the case of ideal MHD, i.e., the dynamics of charged/ioniz
 fluids with infinite conductivity.
 Ohm's law provides the freeze-in condition for the electric field,
 \begin{equation}
-    \EE \simeq - \uu \times \BB\,. \label{ideal_MHD}
+    \EE \simeq - \uu \times \BB\,,
+    \quad \uu \cdot \EE = 0 \,.,
+    \label{ideal_MHD}
 \end{equation}
+which is equivalent to setting
+$E^\mu = U_\nu F^{\mu \nu} = 0$.
 On the other hand, Maxwell equation,
 \begin{equation}
     \partial_t \EE = \nab \times \BB - \JJ\,,
@@ -239,14 +243,18 @@ that appears in $\JJ$ from Ohm's law,
 
 Let us now consider relativistic Gauss' law, taking $\gamma \to 1$ \cite{RoperPol:2025lgc},
 \begin{equation} \label{Gauss}
-    \nab \cdot \EE = J^0 = \rho_e + \uu \cdot \JJ\,,
+    \nab \cdot \EE = J^0 =
+    \gamma (\rho_e + \sigma \uu \cdot \EE) =  \rho_e / \gamma  +
+    \uu \cdot \JJ\,,
 \end{equation}
-where $\rho_e$ is the charge density.
+where $\rho_e$ is the charge density
+in the fluid rest frame.
 Taking divergence of \Eq{ideal_MHD}, we find a closed expression for $\rho_e$:
 \begin{equation}
     \nab \cdot \EE = - \nab \cdot (\uu \times \BB) = - \BB \cdot \oom + \uu
-    \cdot \JJ = \rho_e + \uu \cdot \JJ \Rightarrow \rho_e = 
-    - \BB \cdot \oom\,,
+    \cdot \JJ = \rho_e / \gamma 
+    + \uu \cdot \JJ \Rightarrow \rho_e = 
+    - \gamma\, \BB \cdot \oom\,,
 \end{equation}
 where $\oom = \nab \times \uu$ is the vorticity.
 Therefore, in ideal MHD, the charge density cannot be arbitrarily set to zero
@@ -312,6 +320,16 @@ The induction equation and the Lorentz force become
     + (\JJ \times \BB)_i \,.
 \end{align}
 
+\begin{equation}
+    f_{\rm Lor}^i = \gamma \rho_e 
+    (\EE + \uu \times \BB) + \gamma \sigma \bigl[(\EE + \uu \times \BB) \times \BB ) + \EE (\uu \cdot \EE) \bigr]\,,
+\end{equation}
+\begin{equation}
+    f_{\rm Lor}^0 = \gamma \rho_e \uu \cdot \EE + \gamma \sigma 
+    \EE \cdot 
+    \bigl(\EE + \uu \times \BB \bigr)\,.
+\end{equation}
+
 \subsection{Displacement current}
 
 More interesting is the case when the displacement current cannot be neglected.
@@ -341,7 +359,7 @@ which is equivalent to
 \end{equation}
 
 \section{Divergence cleaning in MHD}
-In \cite{Munz:2000xu,Dedner:2001jc,Komissarov:2007wk} it was pointed out that numerical errors arising from the imprecise treatment of the divergence equations of the $\BB$ and $\EE$ can be mitigated with the use of Generalized Lagrange Multiplayer (GLM) method,
+In \cite{Munz:2000xu,Dedner:2001jc,Komissarov:2007wk,Takamoto:2011ng} it was pointed out that numerical errors arising from the imprecise treatment of the divergence equations of the $\BB$ and $\EE$ can be mitigated with the use of Generalized Lagrange Multiplayer (GLM) method,
 
 \bibliography{library}
 \bibliographystyle{unsrt}
