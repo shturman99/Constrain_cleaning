@@ -25,6 +25,8 @@ Suites
   R  resolution checks of key A/D/G runs at 32^3 and 128^3.
   E  error decomposition (coarse vs reference) at sigma=1 with/without enforcement and for an
      under-resolved fast flow; 32/64/128, snapshots every 0.25.
+  NG no Gamma: curl B computed from A directly (templates TnG*); A/rel, G (with/without damping,
+     with/without a seeded violation) and sigma=1 cases, 32/64/128.
 """
 import os, subprocess, sys, time
 from fnmatch import fnmatch
@@ -32,7 +34,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 MAX_CORES = 8
-CORES = {"T032": 2, "T064": 4, "T128": 8}
+CORES = {"T032": 2, "T064": 4, "T128": 8, "TnG032": 2, "TnG064": 4, "TnG128": 8}
 
 COMMON = ["run:run_pars:nt=600", "run:viscosity_run_pars:nu=2e-2"]
 # fast flow, E initially from Ohm's law with the run's eta (avoids the sigma-independent start-up
@@ -99,6 +101,18 @@ ECASES = {"sig1": eta("1."),
 for c, ov in ECASES.items():
     for N in ["T032", "T064", "T128"]:
         add(f"E/{c}_N{N[1:]}", N, ov, ["run:run_pars:dsnap=0.25"])
+
+# NG: no Gamma (templates TnG*: llongitudinalE=F, lapply_Gamma_corr=F, so curl B = curl curl A
+# from magnetic, and J0 takes Gamma's MVAR slot). Without Gamma, the only Gauss enforcement left
+# is the damping substitution (div E -> J0 in div J); lJ0_divE_in_divJ=T switches it off.
+for N in ["032", "064", "128"]:
+    add(f"NG/A_rel_N{N}", f"TnG{N}", FAST())
+    add(f"NG/G_N{N}", f"TnG{N}")
+    add(f"NG/G_divE_N{N}", f"TnG{N}", DIVE)
+    add(f"NG/sig1_N{N}", f"TnG{N}", eta("1."), ["run:run_pars:dsnap=0.25"])
+    add(f"NG/sig1_divE_N{N}", f"TnG{N}", eta("1."), DIVE, ["run:run_pars:dsnap=0.25"])
+add("NG/G_pert_N064", "TnG064", PERT)
+add("NG/G_divE_pert_N064", "TnG064", DIVE, PERT)
 
 
 def status(name):

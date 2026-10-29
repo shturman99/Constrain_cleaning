@@ -1,0 +1,14 @@
+!                       -*-f90-*-    (for Emacs)
+!  cparam.local
+!
+!  Local settings concerning grid size and number of CPUs.
+!  This file is included by cparam.f90
+!
+!  1 chunk for divE_as_aux
+!
+!  J0 (rhoe slot) replaces Gamma in the 4 MVAR of special/disp_current (llongitudinalE=F)
+! MAUX CONTRIBUTION 1
+! COMMUNICATED AUXILIARIES 0
+!
+integer, parameter :: ncpus=4,nprocx=1,nprocz=2,nprocy=ncpus/(nprocx*nprocz)
+integer, parameter :: nxgrid=64,nygrid=nxgrid,nzgrid=nxgrid

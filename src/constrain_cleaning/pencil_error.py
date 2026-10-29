@@ -29,10 +29,13 @@ VEC = {"u": ("ux", "uy", "uz"), "A": ("ax", "ay", "az"), "E": ("ex", "ey", "ez")
 
 
 def read_state(run, ivar):
-    """Snapshot VAR<ivar> of a Pencil run: dict of (nz, ny, nx) arrays, t, and first grid point (z, y, x)."""
+    """Snapshot VAR<ivar> of a Pencil run: dict of (nz, ny, nx) arrays, t, and first grid point (z, y, x).
+
+    Gamma is absent in runs without it (llongitudinalE=F); the Gamma - div A part is then skipped.
+    """
     import pencil as pc
     v = pc.read.var(datadir=str(Path(run) / "data"), ivar=ivar, trimall=True, quiet=True)
-    s = {name: np.asarray(getattr(v, name)) for name in FIELDS}
+    s = {name: np.asarray(getattr(v, name)) for name in FIELDS if hasattr(v, name)}
     s["t"] = float(v.t)
     s["x0"] = (float(v.z[0]), float(v.y[0]), float(v.x[0]))
     return s
@@ -131,22 +134,26 @@ def decompose(coarse, ref, lams=(np.inf, 1.0, 0.0), mus=(0.0, 1.0, np.inf)):
     errors after the cleaning step, plus |e_perp|^2 and the Pythagoras check for finite weights.
     """
     nc = coarse["ex"].shape[0]
-    cN = {f: drop_nyquist(coeffs(coarse[f], coarse["x0"])) for f in FIELDS}
-    cR = {f: restrict(coeffs(ref[f], ref["x0"]), nc) for f in FIELDS}
-    e = {f: cN[f] - cR[f] for f in FIELDS}
+    fields = [f for f in FIELDS if f in coarse and f in ref]   # no Gamma in runs with llongitudinalE=F
+    has_gamma = "Gamma" in fields
+    cN = {f: drop_nyquist(coeffs(coarse[f], coarse["x0"])) for f in fields}
+    cR = {f: restrict(coeffs(ref[f], ref["x0"]), nc) for f in fields}
+    e = {f: cN[f] - cR[f] for f in fields}
     k = kgrid(nc)
     k2 = sum(kk ** 2 for kk in k)
 
     vG = div(cN, VEC["E"], k) - cN["rhoe"]         # coarse violation (seen by the coarse run)
     vG_ref = div(cR, VEC["E"], k) - cR["rhoe"]     # reference violation, should be << vG
-    vA = cN["Gamma"] - div(cN, VEC["A"], k)
-    vA_ref = cR["Gamma"] - div(cR, VEC["A"], k)
+    if has_gamma:
+        vA = cN["Gamma"] - div(cN, VEC["A"], k)
+        vA_ref = cR["Gamma"] - div(cR, VEC["A"], k)
 
     E2 = lambda d: sum(norm2(d[i]) for i in range(3))
     eE = tuple(e[f] for f in VEC["E"]); eA = tuple(e[f] for f in VEC["A"])
-    out = {"t": coarse["t"], "N": nc,
-           "e2": {f: norm2(e[f]) for f in FIELDS}, "x2": {f: norm2(cR[f]) for f in FIELDS},
-           "vG2": norm2(vG), "vG2_ref": norm2(vG_ref), "vA2": norm2(vA), "vA2_ref": norm2(vA_ref),
+    out = {"t": coarse["t"], "N": nc, "has_gamma": has_gamma,
+           "e2": {f: norm2(e[f]) for f in fields}, "x2": {f: norm2(cR[f]) for f in fields},
+           "vG2": norm2(vG), "vG2_ref": norm2(vG_ref),
+           "vA2": norm2(vA) if has_gamma else np.nan, "vA2_ref": norm2(vA_ref) if has_gamma else np.nan,
            "gauss": {}, "gamma": {}}
     eE2, eJ2 = E2(eE), out["e2"]["rhoe"]
     for lam in lams:
@@ -160,8 +167,8 @@ def decompose(coarse, ref, lams=(np.inf, 1.0, 0.0), mus=(0.0, 1.0, np.inf)):
             r["metric_before"] = eE2 + lam ** 2 * eJ2
             r["metric_after"] = r["eE2"] + lam ** 2 * r["eJ2"]
         out["gauss"][lam] = r
-    eA2, eG2 = E2(eA), out["e2"]["Gamma"]
-    for mu in mus:
+    eA2, eG2 = E2(eA), out["e2"].get("Gamma", np.nan)
+    for mu in (mus if has_gamma else ()):
         dG, dA = gamma_correction(vA, k, mu)
         aA = tuple(eA[i] + dA[i] for i in range(3)); aG = e["Gamma"] + dG
         r = {"eA2": E2(aA), "eG2": norm2(aG)}
@@ -171,7 +178,9 @@ def decompose(coarse, ref, lams=(np.inf, 1.0, 0.0), mus=(0.0, 1.0, np.inf)):
             r["metric_before"] = eG2 + mu ** 2 * eA2
             r["metric_after"] = r["eG2"] + mu ** 2 * r["eA2"]
         out["gamma"][mu] = r
-    out["spec_e"] = {name: shell_sum(sum(np.abs(e[f]) ** 2 for f in comps)) for name, comps in
-                     {"u": VEC["u"], "A": VEC["A"], "E": VEC["E"], "J0": ("rhoe",), "Gamma": ("Gamma",)}.items()}
+    groups = {"u": VEC["u"], "A": VEC["A"], "E": VEC["E"], "J0": ("rhoe",)}
+    if has_gamma:
+        groups["Gamma"] = ("Gamma",)
+    out["spec_e"] = {name: shell_sum(sum(np.abs(e[f]) ** 2 for f in comps)) for name, comps in groups.items()}
     out["spec_vG"] = shell_sum(np.abs(vG) ** 2)
     return out

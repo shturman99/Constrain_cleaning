@@ -531,10 +531,18 @@ index 947a85c..f79e14f 100644
          call parse_name(iname,cname(iname),cform(iname),'divJm',idiag_divJm)
          call parse_name(iname,cname(iname),cform(iname),'rhoem',idiag_rhoem)
 diff --git a/home/mgurgeni/pencil-code/src/density.f90 b/src/density.f90
-index 46a9bab..c7c83c5 100644
+index c6468c0..52b77c6 100644
 --- a/home/mgurgeni/pencil-code/src/density.f90
 +++ b/src/density.f90
-@@ -3004,11 +3004,13 @@ use Sub, only: dot2_mn
+@@ -20,7 +20,6 @@
+ ! PENCILS PROVIDED rhos1; glnrhos(3)
+ ! PENCILS PROVIDED totenergy_rel; divss
+ ! PENCILS EXPECTED ext_force(4)
+-! PENCILS EXPECTED gr_sqrtg; gr_alp; gr_dalp(3); gr_beta(3); gr_gamu(6); gr_Kij(6)
+ !
+ !***************************************************************
+ module Density
+@@ -3002,11 +3001,13 @@ use Sub, only: dot2_mn
              if (ladvection_density) density_rhs = density_rhs - cs20_corr*p%uglnrho
            endif
            if (lext_force) then

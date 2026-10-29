@@ -91,3 +91,16 @@ def test_pythagoras_for_finite_weights(pair):
         for w, r in out[group].items():
             if "eperp2" in r:
                 assert np.isclose(r["metric_after"], r["metric_before"] - r["eperp2"], rtol=1e-10), (group, w)
+
+
+def test_states_without_gamma(pair):
+    """Runs with llongitudinalE=F have no Gamma: Gauss part unchanged, Gamma part skipped."""
+    coarse, ref = pair
+    full = pe.decompose(coarse, ref)
+    no_g = pe.decompose({k: v for k, v in coarse.items() if k != "Gamma"},
+                        {k: v for k, v in ref.items() if k != "Gamma"})
+    assert full["has_gamma"] and not no_g["has_gamma"] and no_g["gamma"] == {}
+    assert "Gamma" not in no_g["e2"] and "Gamma" not in no_g["spec_e"]
+    for lam in full["gauss"]:
+        assert np.isclose(no_g["gauss"][lam]["eE2"], full["gauss"][lam]["eE2"], rtol=1e-12)
+        assert np.isclose(no_g["gauss"][lam]["eJ2"], full["gauss"][lam]["eJ2"], rtol=1e-12)
