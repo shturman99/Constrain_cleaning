@@ -1,0 +1,6 @@
+team = "control-fft-cheat"
+level = 1
+entry = "model.py:Projector"
+train = "model.py"
+seed = 0
+description = "Uses the exact FFT projection: perfect scores, must be rejected."

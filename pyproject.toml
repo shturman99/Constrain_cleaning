@@ -21,6 +21,9 @@ dev = [
     "lazy-loader>=0.6",
     "pytest",
 ]
+hackathon = [
+    "torch>=2.15.0",
+]
 
 [build-system]
 requires = ["hatchling"]

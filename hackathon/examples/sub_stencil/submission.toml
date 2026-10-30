@@ -1,0 +1,10 @@
+team = "example-stencil"
+level = 1
+entry = "model.py:Projector"
+weights = "weights.pt"
+train = "train.py"
+seed = 0
+description = "Local linear stencil of radius 3 (baseline 2), trained on all three spectral families at 32^3."
+
+[model_args]
+radius = 3

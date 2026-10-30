@@ -44,3 +44,5 @@ runs/pencil/**/*.tmp
 *.fdb_latexmk
 *.synctex.gz
 *.pdf
+hackathon/data/
+hackathon/**/report_level*.json
